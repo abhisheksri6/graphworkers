@@ -1,0 +1,20 @@
+# entity_extraction worker — open-source, CPU-only runtime deps (v1, specs/knowledge-graph).
+#
+# ADR-0009: the inc-1 layered ensemble is (rules/gazetteer > spaCy > LLM-API) and is TORCH-FREE.
+# en_core_web_lg is a CNN pipeline (NOT transformer-based), so spaCy installs with no torch.
+# A future local transformer engine must load via raw `onnxruntime` (never `optimum`/`transformers`
+# at runtime — `optimum[onnxruntime]` still pulls torch, spike F-ONNX-1). KG-AC-18 asserts no torch.
+celery
+kombu
+pydantic==2.9.2
+pydantic-settings
+httpx
+# LLM engine (llm_ner + llm relations) via Bedrock — lazy-imported, only when an LLM connection
+# is actually used; the rules/gazetteer/spaCy strategies never import it.
+boto3
+# spaCy NER engine (spacy_ner) + EntityRuler-backed gazetteer. Pinned to the spike-proven version.
+# The en_core_web_lg-3.7.1 model is installed BY-COPY (SPACY_MODEL_PATH), NOT via pip — see README
+# / task C12. The GLEIF-LEI gazetteer index is a by-copy SQLite file (stdlib sqlite3, no native dep).
+spacy==3.7.5
+# Shared storage/callback/guardrails/usage lib — installed as a local wheel per the v1 worker carve-out.
+./ctx_worker_shared-1.6.1-py3-none-any.whl

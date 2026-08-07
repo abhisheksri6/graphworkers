@@ -1,0 +1,31 @@
+[2026-08-07 13:35:59,665: INFO/MainProcess] Connected to amqp://guest:**@10.73.88.101:5672//
+[2026-08-07 13:35:59,707: INFO/MainProcess] mingle: searching for neighbors
+[2026-08-07 13:36:00,821: INFO/MainProcess] mingle: sync with 10 nodes
+[2026-08-07 13:36:00,824: INFO/MainProcess] mingle: sync complete
+[2026-08-07 13:36:00,900: INFO/MainProcess] entity_extraction__worker@AVDGENAIL18-3 ready.
+[2026-08-07 13:40:13,150: INFO/MainProcess] Task entity_extraction_worker.runtime_entity_extraction_task[e3e33ceb-c857-452e-96ec-249e79e5046e] received
+[2026-08-07 13:40:13,156: WARNING/MainProcess] gazetteer enabled but unavailable (No module named 'gazetteers') — skipping gazetteer layer
+[2026-08-07 13:40:13,350: INFO/MainProcess] HTTP Request: POST http://10.73.88.101:8000/internal/connection-profiles/decrypt "HTTP/1.1 200 OK"
+[2026-08-07 13:40:16,387: INFO/MainProcess] missed heartbeat from ollama_worker@AVDGENAIL18-3
+[2026-08-07 13:40:16,387: INFO/MainProcess] missed heartbeat from table_specialist_worker@AVDGENAIL18-3
+[2026-08-07 13:40:16,388: INFO/MainProcess] missed heartbeat from qdrant_worker@AVDGENAIL18-3
+[2026-08-07 13:40:16,389: INFO/MainProcess] missed heartbeat from aws_bedrock@AVDGENAIL18-3
+[2026-08-07 13:40:16,389: INFO/MainProcess] missed heartbeat from tesseract_worker@AVDGENAIL18-3
+[2026-08-07 13:40:16,390: INFO/MainProcess] missed heartbeat from semantic_chunking_worker@AVDGENAIL18-3
+[2026-08-07 13:40:16,390: INFO/MainProcess] missed heartbeat from textprocessing_worker@AVDGENAIL18-3
+[2026-08-07 13:40:21,404: INFO/MainProcess] missed heartbeat from docling_worker@AVDGENAIL18-3
+[2026-08-07 13:40:21,405: INFO/MainProcess] missed heartbeat from folder_worker@AVDGENAIL18-3
+[2026-08-07 13:40:21,405: INFO/MainProcess] missed heartbeat from classification_worker@AVDGENAIL18-3
+[2026-08-07 13:40:34,451: ERROR/MainProcess] entity_extraction.runtime_failed action=fail exception=ModuleNotFoundError: No module named 'candidate_pairs'
+[2026-08-07 13:40:34,483: INFO/MainProcess] HTTP Request: POST http://10.73.88.101:8000/entity-extraction/runtime-worker-results "HTTP/1.1 200 OK"
+[2026-08-07 13:40:34,485: INFO/MainProcess] Task entity_extraction_worker.runtime_entity_extraction_task[e3e33ceb-c857-452e-96ec-249e79e5046e] succeeded in 21.344000000040978s: {'task_id': 'a25ac0da-0c65-4979-be4f-08c19dec8acd', 'status': 'failed'}
+[2026-08-07 13:40:34,487: WARNING/MainProcess] Substantial drift from ollama_worker@AVDGENAIL18-3 may mean clocks are out of sync.  Current drift is 21 seconds.  [orig: 2026-08-07 13:40:34.486844 recv: 2026-08-07 13:40:13.286036]
+[2026-08-07 13:40:34,487: WARNING/MainProcess] Substantial drift from table_specialist_worker@AVDGENAIL18-3 may mean clocks are out of sync.  Current drift is 21 seconds.  [orig: 2026-08-07 13:40:34.487880 recv: 2026-08-07 13:40:13.487267]
+[2026-08-07 13:40:34,488: WARNING/MainProcess] Substantial drift from qdrant_worker@AVDGENAIL18-3 may mean clocks are out of sync.  Current drift is 21 seconds.  [orig: 2026-08-07 13:40:34.488903 recv: 2026-08-07 13:40:13.622049]
+[2026-08-07 13:40:34,489: WARNING/MainProcess] Substantial drift from aws_bedrock@AVDGENAIL18-3 may mean clocks are out of sync.  Current drift is 21 seconds.  [orig: 2026-08-07 13:40:34.489901 recv: 2026-08-07 13:40:13.871152]
+[2026-08-07 13:40:34,490: WARNING/MainProcess] Substantial drift from tesseract_worker@AVDGENAIL18-3 may mean clocks are out of sync.  Current drift is 21 seconds.  [orig: 2026-08-07 13:40:34.490906 recv: 2026-08-07 13:40:13.934676]
+[2026-08-07 13:40:34,491: WARNING/MainProcess] Substantial drift from semantic_chunking_worker@AVDGENAIL18-3 may mean clocks are out of sync.  Current drift is 20 seconds.  [orig: 2026-08-07 13:40:34.491910 recv: 2026-08-07 13:40:14.074763]
+[2026-08-07 13:40:34,492: WARNING/MainProcess] Substantial drift from textprocessing_worker@AVDGENAIL18-3 may mean clocks are out of sync.  Current drift is 20 seconds.  [orig: 2026-08-07 13:40:34.492906 recv: 2026-08-07 13:40:14.106099]
+[2026-08-07 13:40:34,493: WARNING/MainProcess] Substantial drift from docling_worker@AVDGENAIL18-3 may mean clocks are out of sync.  Current drift is 20 seconds.  [orig: 2026-08-07 13:40:34.493917 recv: 2026-08-07 13:40:14.871694]
+[2026-08-07 13:40:34,495: WARNING/MainProcess] Substantial drift from folder_worker@AVDGENAIL18-3 may mean clocks are out of sync.  Current drift is 19 seconds.  [orig: 2026-08-07 13:40:34.495434 recv: 2026-08-07 13:40:15.013283]
+[2026-08-07 13:40:34,497: WARNING/MainProcess] Substantial drift from classification_worker@AVDGENAIL18-3 may mean clocks are out of sync.  Current drift is 19 seconds.  [orig: 2026-08-07 13:40:34.497552 recv: 2026-08-07 13:40:15.012820]

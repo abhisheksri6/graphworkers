@@ -1,0 +1,14 @@
+# entity_canonicalization worker — open-source, CPU-only runtime deps (v1, specs/knowledge-graph).
+#
+# Canonicalization resolves duplicate entity mentions to one canonical identity over a hold-released
+# batch. No NER model (no spaCy) and TORCH-FREE (ADR-0009): normalization + fuzzy matching use the
+# stdlib (unicodedata + difflib); LLM adjudication of the ambiguous band goes through Bedrock (boto3).
+celery
+kombu
+pydantic==2.9.2
+pydantic-settings
+httpx
+# LLM adjudication (ambiguous match band) via Bedrock — lazy-imported, only when a pair reaches it.
+boto3
+# Shared storage/callback/usage lib — installed as a local wheel per the v1 worker carve-out.
+./ctx_worker_shared-1.6.0-py3-none-any.whl

@@ -1,0 +1,20 @@
+ 
+ -------------- entity_extraction__worker@AVDGENAIL18-3 v5.6.3 (recovery)
+--- ***** ----- 
+-- ******* ---- Windows-10-10.0.26200-SP0 2026-08-07 13:35:59
+- *** --- * --- 
+- ** ---------- [config]
+- ** ---------- .> app:         entity_extraction_worker:0x1db5fc8a1d0
+- ** ---------- .> transport:   amqp://guest:**@10.73.88.101:5672//
+- ** ---------- .> results:     rpc://
+- *** --- * --- .> concurrency: 8 (solo)
+-- ******* ---- .> task events: OFF (enable -E to monitor tasks in this worker)
+--- ***** ----- 
+ -------------- [queues]
+                .> entity_extraction exchange=entity_extraction(direct) key=entity_extraction
+                .> runtime_entity_extraction exchange=entity_extraction(direct) key=entity_extraction
+
+[tasks]
+  . entity_extraction_worker.entity_extraction_task
+  . entity_extraction_worker.runtime_entity_extraction_task
+

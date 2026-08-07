@@ -1,0 +1,13 @@
+# kg_export worker — open-source, CPU-only runtime deps (v1, specs/knowledge-graph).
+#
+# Projects the canonicalized Postgres graph into Neo4j (a rebuildable projection, ADR-0006). No NER,
+# no LLM — TORCH-FREE, no spaCy/boto3. The Neo4j Python driver writes via the knowledge_graph
+# connection (decrypted at runtime); tests mock the driver (only the live smoke needs a real Neo4j).
+celery
+kombu
+pydantic==2.9.2
+pydantic-settings
+httpx
+neo4j
+# Shared storage/callback/usage lib — installed as a local wheel per the v1 worker carve-out.
+./ctx_worker_shared-1.6.0-py3-none-any.whl

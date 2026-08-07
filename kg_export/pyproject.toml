@@ -1,0 +1,8 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+markers = [
+    "ac(id): ties a test to a spec acceptance criterion, e.g. @pytest.mark.ac(\"KG-AC-27\")",
+    "eval: probabilistic/quality test — run with -m eval",
+    "live: live smoke test — needs a real Neo4j connection profile (skipped by default)",
+]

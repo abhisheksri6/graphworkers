@@ -1,0 +1,32 @@
+# graphworkers repo — scoped to the KG-related workers only; every other sibling under
+# workers/ (parser, chunking, classification, export, ingest_worker, textprocessing,
+# vectorization, shared) stays out of this repo entirely.
+/*
+!/entity_extraction/
+!/entity_canonicalization/
+!/kg_export/
+!/.gitignore
+!/README.md
+
+# Per-worker local environment / build artifacts — never committed.
+entity_extraction/venv/
+entity_extraction/.env
+entity_extraction/models/
+entity_extraction/__pycache__/
+entity_extraction/**/__pycache__/
+entity_extraction/.pytest_cache/
+entity_extraction/**/.pytest_cache/
+
+entity_canonicalization/venv/
+entity_canonicalization/.env
+entity_canonicalization/__pycache__/
+entity_canonicalization/**/__pycache__/
+entity_canonicalization/.pytest_cache/
+entity_canonicalization/**/.pytest_cache/
+
+kg_export/venv/
+kg_export/.env
+kg_export/__pycache__/
+kg_export/**/__pycache__/
+kg_export/.pytest_cache/
+kg_export/**/.pytest_cache/

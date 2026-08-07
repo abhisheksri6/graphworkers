@@ -1,0 +1,7 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+markers = [
+    "ac(id): ties a test to a spec acceptance criterion, e.g. @pytest.mark.ac(\"KG-AC-22\")",
+    "eval: probabilistic/quality test — run with -m eval (baseline-relative, needs the labeled set)",
+]
