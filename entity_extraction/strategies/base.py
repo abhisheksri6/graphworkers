@@ -24,6 +24,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, List, Optional, Tuple
 
+from candidate_pairs import enumerate_candidate_pairs
 from core import (
     Candidate, Relation, assign_occurrence_indices, build_edge_records, build_entity_records,
     build_summary, entity_uid_key_map, filter_bare_pronouns, merge_candidates, merge_edge_records,
@@ -215,8 +216,11 @@ def run_pipeline(chunks: List[Chunk], config: ExtractionConfig, pack, *, folder_
         # KG-AC-60/61: candidate pairs are enumerated over the FINAL merged (post span-overlap-
         # resolution) entity set, never the raw pre-merge candidates — otherwise overlapping
         # mentions from different layers would pollute pairing with duplicate/conflicting spans.
-        from candidate_pairs import enumerate_candidate_pairs
-
+        # `enumerate_candidate_pairs` is imported at MODULE level (top of this file), NOT here:
+        # Celery drops cwd from sys.path after the app import, so a lazy absolute import of a
+        # top-level worker module raises ModuleNotFoundError at task time — the 2026-08-08
+        # production failure (see tests/test_worker_runtime_imports.py). The relative import
+        # below is safe: `strategies` is already in sys.modules with a known __path__.
         from .llm_classify import LlmClassifyStrategy
         sentence_spans = {ch.chunk_id: [(s.start_char, s.end_char) for s in shared_nlp(ch.text).sents]
                           for ch in chunks}

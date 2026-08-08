@@ -15,6 +15,11 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
+# NOTE: these two are ABSOLUTE imports of top-level worker modules, and THIS module is imported
+# lazily (at task time, from strategies/base.py). That only works because `strategies/base.py`
+# imports both at app-import time, putting them in sys.modules before any task runs — Celery drops
+# cwd from sys.path once the `-A` app import finishes, so an absolute import that first resolves at
+# task time raises ModuleNotFoundError (2026-08-08 production failure). Do not rely on sys.path here.
 from candidate_pairs import CandidatePair
 from core import Relation
 
