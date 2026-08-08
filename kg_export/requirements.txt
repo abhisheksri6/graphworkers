@@ -10,4 +10,4 @@ pydantic-settings
 httpx
 neo4j
 # Shared storage/callback/usage lib — installed as a local wheel per the v1 worker carve-out.
-./ctx_worker_shared-1.6.0-py3-none-any.whl
+./ctx_worker_shared-1.7.0-py3-none-any.whl

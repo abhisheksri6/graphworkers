@@ -17,4 +17,4 @@ boto3
 # / task C12. The GLEIF-LEI gazetteer index is a by-copy SQLite file (stdlib sqlite3, no native dep).
 spacy==3.7.5
 # Shared storage/callback/guardrails/usage lib — installed as a local wheel per the v1 worker carve-out.
-./ctx_worker_shared-1.6.1-py3-none-any.whl
+./ctx_worker_shared-1.7.0-py3-none-any.whl
