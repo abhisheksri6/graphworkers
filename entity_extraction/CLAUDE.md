@@ -89,7 +89,10 @@ writes artifacts to DB (parser_element, chunk, embedding rows) via `StorageClien
 thin result summary to the backend callback endpoint. Workers declare their accepted input and
 output fields in a `CAPABILITY_SCHEMA` dict at the top of the worker file; this schema is stored
 in `system_capabilities.capability_schema` and used by the frontend inspector and backend
-field-presence validator.
+field-presence validator. An enum-like input field may declare **`allowed`** (a list of
+string values, `specs/capability-schema` v1): the shared validator rejects out-of-list
+values loudly and the inspector renders the field as a dropdown; fields without `allowed`
+behave exactly as before.
 
 ### Worker Naming Standard
 The full governance reference is `WORKER_NAMING.md` **in this repo** (adding workers, renaming,
