@@ -15,7 +15,8 @@ Two invocation modes:
   - ``complete_tool(...) -> dict`` (NEW) — forces the model to call a single named tool whose
     arguments are typed by a JSON schema (KG-AC-43's mechanism amendment): the API validates the
     shape, not a downstream `json.loads`. The static system vocabulary is marked cacheable
-    (`cachePoint`); a `stopReason=malformed_tool_use` response is retried exactly once (KG-AC-P3);
+    (`cachePoint`, ONLY for models that support it — see ``supports_prompt_caching``); a
+    `stopReason=malformed_tool_use` response is retried exactly once (KG-AC-P3);
     a retry that still fails raises loud (`LlmOutputError`) and propagates — never a silent partial
     graph.
 
@@ -32,7 +33,17 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_MODEL = "amazon.nova-pro-v1:0"
+_DEFAULT_MODEL = "openai.gpt-oss-120b-1:0"
+
+# Bedrock prompt caching is MODEL-SPECIFIC. Sending a `cachePoint` block to a model that does not
+# support it fails the call outright with a generic `AccessDeniedException` ("You invoked an
+# unsupported model or your request did not allow prompt caching") — which reads like a credentials
+# problem, not a capability one (found live 2026-08-08 when switching to openai.gpt-oss-120b).
+# Caching is a COST optimisation, never a correctness requirement, so an unrecognised model must
+# fail SAFE (no cache block): the cost of skipping it is spend, the cost of sending it wrongly is
+# 100% of calls failing. Prefixes are matched after stripping any cross-region inference prefix
+# (e.g. "us."/"eu."/"apac."). Extend this tuple when a family is CONFIRMED to support caching.
+_PROMPT_CACHE_MODEL_PREFIXES = ("anthropic.", "amazon.nova")
 # 2026-08-06 production RCA: the original 2048 was sized before KG-AC-46 (evolve v5) added a
 # mandatory full-sentence `evidence` field to every relation -- a dense chunk's tool-call JSON can
 # exceed that, producing a deterministic (temperature=0) malformed-tool-use failure on BOTH the
@@ -105,6 +116,28 @@ def _bedrock_converse(cfg: Dict[str, Any], *, model: str, system_blocks: Optiona
     if tool_config:
         kwargs["toolConfig"] = tool_config
     return client.converse(**kwargs)
+
+
+def supports_prompt_caching(model: Optional[str]) -> bool:
+    """True iff ``model`` is a family CONFIRMED to accept Bedrock `cachePoint` blocks. Unknown or
+    empty -> False (fail safe, see _PROMPT_CACHE_MODEL_PREFIXES)."""
+    if not model:
+        return False
+    bare = model
+    for region_prefix in ("us.", "eu.", "apac."):  # cross-region inference profile ids
+        if bare.startswith(region_prefix):
+            bare = bare[len(region_prefix):]
+            break
+    return bare.startswith(_PROMPT_CACHE_MODEL_PREFIXES)
+
+
+def build_system_blocks(system_text: str, model: Optional[str]) -> List[Dict[str, Any]]:
+    """Converse `system` blocks: the static vocabulary, plus a cachePoint ONLY when the resolved
+    model supports prompt caching (KG-AC-43's caching note is an optimisation, not a contract)."""
+    blocks: List[Dict[str, Any]] = [{"text": system_text}]
+    if supports_prompt_caching(model):
+        blocks.append({"cachePoint": {"type": "default"}})
+    return blocks
 
 
 def _extract_text(resp: Dict[str, Any]) -> str:
@@ -222,7 +255,7 @@ class BedrockLlmClient:
         cacheable; ``user_text`` (per-chunk content) never is. ONE retry on a schema-invalid tool
         call; a retry that still fails raises ``LlmOutputError`` (propagates, fails the folder)."""
         self._resolve()
-        system_blocks = [{"text": system_text}, {"cachePoint": {"type": "default"}}]
+        system_blocks = build_system_blocks(system_text, self._resolved_model)
         messages = [{"role": "user", "content": [{"text": user_text}]}]
         tool_config = {
             "tools": [{"toolSpec": {"name": tool_name, "description": tool_description,

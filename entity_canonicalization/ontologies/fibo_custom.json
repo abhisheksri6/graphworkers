@@ -1,0 +1,93 @@
+{
+  "name": "fibo_custom",
+  "version": "1.1",
+  "description": "Enterprise ontology pack derived from the Enterprise Ontology Reference Guide (Party/Account/Contact/Organization/Sales/Asset domains, FIBO-aligned). DRAFT -- not yet GATE-2 reviewed. Customers are modeled as a Role played by a Party (playsRole -> CustomerRole), never a Person subtype, per the guide's own stated principle. 'Regulator' and 'Custodian' were added as Organization subtypes because the guide's own relationship examples (Organisation -> regulatedBy -> Regulator; BrokerageAccount -> servicedBy -> Custodian) name them as if declared, but no class definition existed for them elsewhere in the guide. Identifier values (LEI, Tax ID, Registration Number, DUNS) are NOT separate entity types -- consistent with fibo_core's convention, LEI is gazetteer-linked external_id metadata on the owning Organization, not its own extractable span.",
+  "entity_types": [
+    {"type": "Party", "parent": null, "spacy_labels": [], "guidance": "Any actor participating in business activities.", "iri": "fibo-fnd-ppty-pty:Party"},
+    {"type": "Person", "parent": "Party", "spacy_labels": ["PERSON"], "guidance": "A natural person.", "iri": "fibo-fnd-ppty-pty:Person"},
+    {"type": "Organization", "parent": "Party", "spacy_labels": ["ORG"], "guidance": "Any legal entity, company, institution, agency, or organizational unit.", "iri": "fibo-fnd-org-org:Organization"},
+    {"type": "LegalEntity", "parent": "Organization", "spacy_labels": [], "guidance": "An organization formally registered as a distinct legal person.", "iri": "fibo-be-le-lei:LegalEntity"},
+    {"type": "BusinessUnit", "parent": "Organization", "spacy_labels": [], "guidance": "An internal organizational division, not a separately registered legal entity."},
+    {"type": "Department", "parent": "Organization", "spacy_labels": [], "guidance": "An internal functional department within an organization."},
+    {"type": "Fund", "parent": "Organization", "spacy_labels": [], "guidance": "A pooled investment vehicle (mutual fund, hedge fund, ETF)."},
+    {"type": "Bank", "parent": "Organization", "spacy_labels": [], "guidance": "A depository, commercial, or investment bank."},
+    {"type": "BrokerDealer", "parent": "Organization", "spacy_labels": [], "guidance": "A firm that buys/sells securities on behalf of clients or itself."},
+    {"type": "AssetManager", "parent": "Organization", "spacy_labels": [], "guidance": "A firm that manages investment assets on behalf of clients."},
+    {"type": "Regulator", "parent": "Organization", "spacy_labels": [], "guidance": "A regulatory or supervisory authority (e.g. SEC, FINRA, FCA)."},
+    {"type": "Custodian", "parent": "Organization", "spacy_labels": [], "guidance": "An organization providing custody/safekeeping services for financial assets."},
+
+    {"type": "Role", "parent": null, "spacy_labels": [], "guidance": "A role a Party plays in a business context -- never a subtype of the Party itself."},
+    {"type": "CustomerRole", "parent": "Role", "spacy_labels": [], "guidance": "The role of being a customer, played by a Person or Organization via playsRole."},
+
+    {"type": "Account", "parent": null, "spacy_labels": [], "guidance": "A financial or customer-servicing account.", "iri": "fibo-fbc-fi-fi:FinancialAccount"},
+    {"type": "BrokerageAccount", "parent": "Account", "spacy_labels": [], "guidance": "An account for trading securities.", "iri": "fibo-fbc-fi-fi:SecuritiesAccount"},
+    {"type": "DepositAccount", "parent": "Account", "spacy_labels": [], "guidance": "A deposit-taking account (checking, savings)."},
+    {"type": "CustodyAccount", "parent": "Account", "spacy_labels": [], "guidance": "An account holding assets in custody on behalf of an owner."},
+    {"type": "LoanAccount", "parent": "Account", "spacy_labels": [], "guidance": "An account representing an extended loan/credit facility."},
+    {"type": "InvestmentAccount", "parent": "Account", "spacy_labels": [], "guidance": "A general investment account."},
+
+    {"type": "ContactPoint", "parent": null, "spacy_labels": [], "guidance": "A channel through which a Party can be reached."},
+    {"type": "Email", "parent": "ContactPoint", "spacy_labels": [], "guidance": "An email address."},
+    {"type": "Phone", "parent": "ContactPoint", "spacy_labels": [], "guidance": "A phone number."},
+    {"type": "Address", "parent": "ContactPoint", "spacy_labels": [], "guidance": "A physical or mailing address.", "iri": "fibo-fnd-plc-loc:Address"},
+    {"type": "SocialHandle", "parent": "ContactPoint", "spacy_labels": [], "guidance": "A social media handle or profile identifier."},
+
+    {"type": "Agreement", "parent": null, "spacy_labels": [], "guidance": "A binding agreement or contract between parties.", "iri": "fibo-fnd-agr-ctr:Contract"},
+
+    {"type": "Lead", "parent": null, "spacy_labels": [], "guidance": "A prospective sales contact not yet qualified as an opportunity."},
+    {"type": "SalesOpportunity", "parent": null, "spacy_labels": [], "guidance": "A qualified, pursuable sales prospect."},
+    {"type": "Conversion", "parent": null, "spacy_labels": [], "guidance": "The event of a lead converting into a sales opportunity."},
+
+    {"type": "Asset", "parent": null, "spacy_labels": [], "guidance": "Anything of economic value owned by a Party."},
+    {"type": "FinancialAsset", "parent": "Asset", "spacy_labels": [], "guidance": "A tradable or holdable financial instrument."},
+    {"type": "Equity", "parent": "FinancialAsset", "spacy_labels": [], "guidance": "Common or preferred stock/shares."},
+    {"type": "Bond", "parent": "FinancialAsset", "spacy_labels": [], "guidance": "A debt security / fixed-income instrument."},
+    {"type": "Derivative", "parent": "FinancialAsset", "spacy_labels": [], "guidance": "An option, future, swap, or other derivative instrument."},
+    {"type": "PhysicalAsset", "parent": "Asset", "spacy_labels": [], "guidance": "A tangible physical asset (real estate, equipment, commodities)."},
+    {"type": "DigitalAsset", "parent": "Asset", "spacy_labels": [], "guidance": "A digital/intangible asset (e.g. digital currency, IP, software license)."}
+  ],
+  "relations": [
+    {"type": "hasAccount", "domain": ["Party"], "range": ["Account"], "guidance": "A party holds an account."},
+    {"type": "hasContactPoint", "domain": ["Party"], "range": ["ContactPoint"], "guidance": "A party can be reached through a contact point."},
+    {"type": "playsRole", "domain": ["Party"], "range": ["Role"], "guidance": "A party plays a role (e.g. customer) -- roles are never subtypes."},
+    {"type": "worksFor", "domain": ["Person"], "range": ["Organization"], "guidance": "A person works for an organization."},
+    {"type": "memberOf", "domain": ["Party"], "range": ["Organization"], "guidance": "A party is a member of an organization."},
+    {"type": "controls", "domain": ["Party"], "range": ["Organization"], "guidance": "A party controls an organization."},
+    {"type": "ownedBy", "domain": ["Account"], "range": ["Party"], "guidance": "An account is owned by a party."},
+    {"type": "owns", "domain": ["Party"], "range": ["Asset", "Organization"], "guidance": "A party owns an asset or a subsidiary organization."},
+    {"type": "holds", "domain": ["Account"], "range": ["FinancialAsset"], "guidance": "An account holds a financial asset (equity, bond, derivative)."},
+    {"type": "servicedBy", "domain": ["Account"], "range": ["Organization"], "guidance": "An account is serviced by an organization (e.g. a custodian)."},
+    {"type": "regulatedBy", "domain": ["Organization"], "range": ["Regulator"], "guidance": "An organization is regulated by a regulatory authority."},
+    {"type": "subsidiaryOf", "domain": ["Organization"], "range": ["Organization"], "guidance": "One organization is a subsidiary of another."},
+    {"type": "resultsIn", "domain": ["SalesOpportunity"], "range": ["Agreement"], "guidance": "A sales opportunity results in a signed agreement."}
+  ],
+  "gazetteer_link_types": ["Organization", "LegalEntity", "Fund", "Bank", "AssetManager", "BrokerDealer", "Regulator", "Custodian"],
+  "regex_patterns": [
+    {"entity_type": "Organization", "pattern": "\\b[A-Z0-9]{18}[0-9]{2}\\b", "checksum": "lei", "_comment": "ISO 17442 LEI shape (18 alnum + 2 check digits), matches fibo_core's sample (ADR-0013/KG-AC-54). 2026-08-07."},
+    {"entity_type": "Email", "pattern": "\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}\\b", "_comment": "Standard email shape; format-defined, no checksum digit exists for email. 2026-08-07."}
+  ],
+  "dep_patterns": [
+    {"relation_type": "worksFor", "src_node": "subject", "dst_node": "object",
+     "_comment": "SVO: '<Person> joined/founded <Organization>' (transitive, direct object). Verified via a spike against a hand-built spaCy Doc, 2026-08-07 -- see workers/entity_extraction Done writeups.",
+     "pattern": [
+       {"RIGHT_ID": "verb", "RIGHT_ATTRS": {"LEMMA": {"IN": ["join", "found"]}}},
+       {"LEFT_ID": "verb", "REL_OP": ">", "RIGHT_ID": "subject", "RIGHT_ATTRS": {"DEP": "nsubj"}},
+       {"LEFT_ID": "verb", "REL_OP": ">", "RIGHT_ID": "object", "RIGHT_ATTRS": {"DEP": {"IN": ["dobj", "obj"]}}}
+     ]},
+    {"relation_type": "worksFor", "src_node": "subject", "dst_node": "object",
+     "_comment": "'<Person> works/worked for <Organization>' (preposition-chain: verb -> prep 'for' -> pobj, a DIFFERENT node shape than the join/found pattern above -- both coexist for the same relation_type, verified 2026-08-07 after fixing a DependencyMatcher key-collision bug that silently dropped whichever pattern registered second).",
+     "pattern": [
+       {"RIGHT_ID": "verb", "RIGHT_ATTRS": {"LEMMA": "work"}},
+       {"LEFT_ID": "verb", "REL_OP": ">", "RIGHT_ID": "subject", "RIGHT_ATTRS": {"DEP": "nsubj"}},
+       {"LEFT_ID": "verb", "REL_OP": ">", "RIGHT_ID": "prep", "RIGHT_ATTRS": {"DEP": "prep", "LEMMA": "for"}},
+       {"LEFT_ID": "prep", "REL_OP": ">", "RIGHT_ID": "object", "RIGHT_ATTRS": {"DEP": "pobj"}}
+     ]},
+    {"relation_type": "controls", "src_node": "subject", "dst_node": "object",
+     "_comment": "SVO: '<Party> controls <Organization>' (transitive, direct object). Verified 2026-08-07. NOTE: 'owns' (Party->Asset|Organization) is deliberately NOT covered here -- its range is multi-type and RulesRelationsStrategy only ever guesses range[0], so it would silently mis-type/drop Organization objects; needs the multi-type disambiguation work first (see strategies/rules_relations.py module docstring).",
+     "pattern": [
+       {"RIGHT_ID": "verb", "RIGHT_ATTRS": {"LEMMA": "control"}},
+       {"LEFT_ID": "verb", "REL_OP": ">", "RIGHT_ID": "subject", "RIGHT_ATTRS": {"DEP": "nsubj"}},
+       {"LEFT_ID": "verb", "REL_OP": ">", "RIGHT_ID": "object", "RIGHT_ATTRS": {"DEP": {"IN": ["dobj", "obj"]}}}
+     ]}
+  ]
+}
