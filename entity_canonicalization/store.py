@@ -13,7 +13,7 @@ from __future__ import annotations
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from core import (
-    Mention, aggregate_edge_group, canonical_key, cluster_external_id, cluster_mentions,
+    Mention, aggregate_edge_group, canonical_key, cluster_mentions,
     normalize_surface, reconcile_type,
 )
 
@@ -36,32 +36,31 @@ def batch_pack_name(cur, folder_ids: Sequence[str]) -> Optional[str]:
 
 def read_staged_mentions(cur, folder_ids: Sequence[str]) -> List[Mention]:
     cur.execute(
-        """SELECT entity_uid, entity_type, surface_form, external_id
+        """SELECT entity_uid, entity_type, surface_form
              FROM public.kg_entities
             WHERE folder_id = ANY(%s) AND stage = 'staged'
             ORDER BY id""",
         (list(folder_ids),),
     )
     out: List[Mention] = []
-    for uid, etype, surface, ext in cur.fetchall():
-        m = Mention(entity_uid=uid, entity_type=etype, surface_form=surface, external_id=ext)
+    for uid, etype, surface in cur.fetchall():
+        m = Mention(entity_uid=uid, entity_type=etype, surface_form=surface)
         m.normalized_form = normalize_surface(surface)
         out.append(m)
     return out
 
 
-def _resolve_or_mint(cur, key: str, entity_type: str, normalized_form: str,
-                     external_id: Optional[str]) -> Tuple[str, bool]:
+def _resolve_or_mint(cur, key: str, entity_type: str, normalized_form: str) -> Tuple[str, bool]:
     """Race-safe resolve-or-mint (KG-AC-38): INSERT ON CONFLICT DO NOTHING RETURNING mints a novel
     canonical; on conflict (existing key, incl. a prior batch's) SELECT the existing id. Returns
     (canonical_id, was_minted)."""
     cur.execute(
         """INSERT INTO public.kg_canonical_entities
-               (canonical_key, entity_type, normalized_form, external_id)
-           VALUES (%s, %s, %s, %s)
+               (canonical_key, entity_type, normalized_form)
+           VALUES (%s, %s, %s)
            ON CONFLICT (canonical_key) DO NOTHING
            RETURNING canonical_id""",
-        (key, entity_type, normalized_form, external_id),
+        (key, entity_type, normalized_form),
     )
     row = cur.fetchone()
     if row is not None:
@@ -172,10 +171,9 @@ def canonicalize_batch(db, folder_ids: Sequence[str], *, fuzzy_floor: float = _D
                                     adjudicate=adjudicate)
         for cluster in clusters:
             rtype = reconcile_type([m.entity_type for m in cluster], pack) if pack else cluster[0].entity_type
-            ext = cluster_external_id(cluster)
             norm = cluster[0].normalized_form
-            key = canonical_key(rtype, norm, ext)
-            cid, was_minted = _resolve_or_mint(cur, key, rtype, norm, ext)
+            key = canonical_key(rtype, norm)
+            cid, was_minted = _resolve_or_mint(cur, key, rtype, norm)
             minted += 1 if was_minted else 0
             merged += 0 if was_minted else 1
             canonical_ids.add(cid)

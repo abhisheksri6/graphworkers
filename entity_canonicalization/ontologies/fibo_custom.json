@@ -1,7 +1,7 @@
 {
   "name": "fibo_custom",
   "version": "1.1",
-  "description": "Enterprise ontology pack derived from the Enterprise Ontology Reference Guide (Party/Account/Contact/Organization/Sales/Asset domains, FIBO-aligned). DRAFT -- not yet GATE-2 reviewed. Customers are modeled as a Role played by a Party (playsRole -> CustomerRole), never a Person subtype, per the guide's own stated principle. 'Regulator' and 'Custodian' were added as Organization subtypes because the guide's own relationship examples (Organisation -> regulatedBy -> Regulator; BrokerageAccount -> servicedBy -> Custodian) name them as if declared, but no class definition existed for them elsewhere in the guide. Identifier values (LEI, Tax ID, Registration Number, DUNS) are NOT separate entity types -- consistent with fibo_core's convention, LEI is gazetteer-linked external_id metadata on the owning Organization, not its own extractable span.",
+  "description": "Enterprise ontology pack derived from the Enterprise Ontology Reference Guide (Party/Account/Contact/Organization/Sales/Asset domains, FIBO-aligned). DRAFT -- not yet GATE-2 reviewed. Customers are modeled as a Role played by a Party (playsRole -> CustomerRole), never a Person subtype, per the guide's own stated principle. 'Regulator' and 'Custodian' were added as Organization subtypes because the guide's own relationship examples (Organisation -> regulatedBy -> Regulator; BrokerageAccount -> servicedBy -> Custodian) name them as if declared, but no class definition existed for them elsewhere in the guide. Identifier values (LEI, Tax ID, Registration Number, DUNS) are NOT separate entity types -- consistent with fibo_core's convention. v11 (2026-08-08): the gazetteer/external-id plane is removed, so no identifier value is extracted or linked to the owning Organization at all.",
   "entity_types": [
     {"type": "Party", "parent": null, "spacy_labels": [], "guidance": "Any actor participating in business activities.", "iri": "fibo-fnd-ppty-pty:Party"},
     {"type": "Person", "parent": "Party", "spacy_labels": ["PERSON"], "guidance": "A natural person.", "iri": "fibo-fnd-ppty-pty:Person"},
@@ -61,9 +61,7 @@
     {"type": "subsidiaryOf", "domain": ["Organization"], "range": ["Organization"], "guidance": "One organization is a subsidiary of another."},
     {"type": "resultsIn", "domain": ["SalesOpportunity"], "range": ["Agreement"], "guidance": "A sales opportunity results in a signed agreement."}
   ],
-  "gazetteer_link_types": ["Organization", "LegalEntity", "Fund", "Bank", "AssetManager", "BrokerDealer", "Regulator", "Custodian"],
   "regex_patterns": [
-    {"entity_type": "Organization", "pattern": "\\b[A-Z0-9]{18}[0-9]{2}\\b", "checksum": "lei", "_comment": "ISO 17442 LEI shape (18 alnum + 2 check digits), matches fibo_core's sample (ADR-0013/KG-AC-54). 2026-08-07."},
     {"entity_type": "Email", "pattern": "\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}\\b", "_comment": "Standard email shape; format-defined, no checksum digit exists for email. 2026-08-07."}
   ],
   "dep_patterns": [

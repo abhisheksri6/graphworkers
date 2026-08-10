@@ -1,5 +1,7 @@
 """Pure canonicalization core — KG-AC-22 (cluster to one identity), KG-AC-23 (type reconciliation via
-the pack hierarchy), KG-AC-24 (LEI-equal anchors a match regardless of string distance). No DB/LLM."""
+the pack hierarchy), KG-AC-24 (normalisation + fuzzy similarity + LLM adjudication of the ambiguous
+band alone — *amended v11: the LEI-equal short-circuit is removed with the gazetteer/external-id
+plane*). No DB/LLM."""
 import pytest
 
 from core import (
@@ -11,8 +13,8 @@ from ontologies import load_pack
 FIBO = load_pack("fibo_core")
 
 
-def _m(uid, etype, surface, ext=None):
-    m = Mention(entity_uid=uid, entity_type=etype, surface_form=surface, external_id=ext)
+def _m(uid, etype, surface):
+    m = Mention(entity_uid=uid, entity_type=etype, surface_form=surface)
     m.normalized_form = normalize_surface(surface)
     return m
 
@@ -26,26 +28,12 @@ def test_normalize_strips_legal_suffixes_and_punct():
 
 
 @pytest.mark.ac("KG-AC-22")
-def test_canonical_key_lei_beats_type_normalized():
-    assert canonical_key("Bank", "acme", external_id="LEI123") == "lei:LEI123"
+def test_canonical_key_is_always_type_normalized():
+    # v11: canonical_key no longer accepts an external_id short-circuit.
     assert canonical_key("Bank", "acme") == "Bank|acme"
 
 
-# ---- three-band match (KG-AC-24 LEI anchor) ------------------------------
-@pytest.mark.ac("KG-AC-24")
-def test_lei_equal_accepts_regardless_of_string_distance():
-    a = _m("1", "Bank", "Acme Bank NA", ext="LEI-X")
-    b = _m("2", "Organization", "ACME BANK, National Association", ext="LEI-X")
-    assert match_band(a, b, fuzzy_floor=0.8, fuzzy_ceiling=0.95) == ACCEPT
-
-
-@pytest.mark.ac("KG-AC-24")
-def test_different_lei_rejects():
-    a = _m("1", "Bank", "Acme Bank", ext="LEI-X")
-    b = _m("2", "Bank", "Acme Bank", ext="LEI-Y")  # same name, different LEI = different entities
-    assert match_band(a, b, fuzzy_floor=0.8, fuzzy_ceiling=0.95) == REJECT
-
-
+# ---- three-band match (KG-AC-24, amended v11) -----------------------------
 @pytest.mark.ac("KG-AC-24")
 def test_exact_normalized_accepts_and_fuzzy_bands():
     a = _m("1", "Organization", "Acme Corp")
@@ -53,6 +41,16 @@ def test_exact_normalized_accepts_and_fuzzy_bands():
     assert match_band(a, b, fuzzy_floor=0.8, fuzzy_ceiling=0.95) == ACCEPT
     c = _m("3", "Organization", "Globex")
     assert match_band(a, c, fuzzy_floor=0.8, fuzzy_ceiling=0.95) == REJECT
+
+
+@pytest.mark.ac("KG-AC-24")
+def test_abbreviation_class_pair_falls_below_fuzzy_floor():
+    # v11's accepted consequence (requirements.md KG-AC-24): an abbreviation-class pair that used to
+    # be rescued by the LEI-equal short-circuit now scores below the fuzzy floor and auto-rejects,
+    # never reaching the adjudicator.
+    a = _m("1", "Organization", "ABC Mfg")
+    b = _m("2", "Organization", "ABC Manufacturing Pvt. Ltd.")
+    assert match_band(a, b, fuzzy_floor=0.8, fuzzy_ceiling=0.95) == REJECT
 
 
 # ---- clustering (KG-AC-22) -----------------------------------------------

@@ -40,14 +40,12 @@ class Relation:
 
 class Pack:
     def __init__(self, name: str, version: str, description: str,
-                 entity_types: Sequence[EntityType], relations: Sequence[Relation],
-                 gazetteer_link_types: Sequence[str]):
+                 entity_types: Sequence[EntityType], relations: Sequence[Relation]):
         self.name = name
         self.version = version
         self.description = description
         self.entity_types: Dict[str, EntityType] = {et.type: et for et in entity_types}
         self.relations: Dict[str, Relation] = {r.type: r for r in relations}
-        self.gazetteer_link_types = set(gazetteer_link_types)
         self._declaration_order = [et.type for et in entity_types]
         self._spacy_map: Dict[str, str] = {}
         for et in entity_types:
@@ -71,8 +69,6 @@ class Pack:
             for t in list(r.domain) + list(r.range):
                 if t not in self.entity_types:
                     raise OntologyError(f"relation '{r.type}' references undeclared type '{t}'")
-            if self.gazetteer_link_types - set(self.entity_types):
-                raise OntologyError("gazetteer_link_types references an undeclared type")
 
     def _assert_dag(self) -> None:
         for start in self.entity_types:
@@ -153,7 +149,7 @@ def load_pack(name_or_path: str) -> Pack:
         ]
         return Pack(
             name=data["name"], version=str(data.get("version", "")), description=data.get("description", ""),
-            entity_types=ets, relations=rels, gazetteer_link_types=data.get("gazetteer_link_types", []),
+            entity_types=ets, relations=rels,
         )
     except KeyError as exc:
         raise OntologyError(f"malformed pack '{name_or_path}': missing key {exc}") from exc

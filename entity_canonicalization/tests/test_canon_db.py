@@ -44,16 +44,16 @@ def conn():
 
 
 def _seed(cur, folder_id, mentions):
-    """mentions: list of (surface, entity_type, external_id|None)."""
-    for i, (surface, etype, ext) in enumerate(mentions):
+    """mentions: list of (surface, entity_type)."""
+    for i, (surface, etype) in enumerate(mentions):
         uid = f"{folder_id}:{i}"
         cur.execute(
             """INSERT INTO public.kg_entities
-                   (folder_id, entity_uid, entity_type, surface_form, external_id,
+                   (folder_id, entity_uid, entity_type, surface_form,
                     ontology_pack, ontology_version, stage)
-               VALUES (%s,%s,%s,%s,%s,'fibo_core','1.0','staged')
+               VALUES (%s,%s,%s,%s,'fibo_core','1.0','staged')
                ON CONFLICT (entity_uid) DO NOTHING""",
-            (folder_id, uid, etype, surface, ext),
+            (folder_id, uid, etype, surface),
         )
 
 
@@ -78,9 +78,9 @@ def test_batch_collapses_dupes_single_instance_and_scoped(conn):
     fa, fb, fc = (f"canon-{uuid.uuid4()}" for _ in range(3))
     try:
         with conn.cursor() as cur:
-            _seed(cur, fa, [("Acme Corp", "Organization", None), ("Acme Corporation", "InvestmentAdviser", None)])
-            _seed(cur, fb, [("Acme Corp", "Organization", None)])   # same entity, different folder
-            _seed(cur, fc, [("Globex Ltd", "Organization", None)])  # OUTSIDE the batch
+            _seed(cur, fa, [("Acme Corp", "Organization"), ("Acme Corporation", "InvestmentAdviser")])
+            _seed(cur, fb, [("Acme Corp", "Organization")])   # same entity, different folder
+            _seed(cur, fc, [("Globex Ltd", "Organization")])  # OUTSIDE the batch
         conn.commit()
 
         # single-instance over the WHOLE released batch (fa + fb in one call), NOT fc
@@ -111,7 +111,7 @@ def test_cross_run_reuses_existing_canonical(conn):
     f1, f2 = f"canon-{uuid.uuid4()}", f"canon-{uuid.uuid4()}"
     try:
         with conn.cursor() as cur:
-            _seed(cur, f1, [("Acme Corp", "Organization", None)])
+            _seed(cur, f1, [("Acme Corp", "Organization")])
         conn.commit()
         s1 = canonicalize_batch(_DbShim(conn), [f1], pack=FIBO)
         conn.commit()
@@ -121,7 +121,7 @@ def test_cross_run_reuses_existing_canonical(conn):
 
         # a LATER batch with the same entity in a new folder -> reuse the existing canonical (merged)
         with conn.cursor() as cur:
-            _seed(cur, f2, [("Acme Corporation", "Organization", None)])
+            _seed(cur, f2, [("Acme Corporation", "Organization")])
         conn.commit()
         s2 = canonicalize_batch(_DbShim(conn), [f2], pack=FIBO)
         conn.commit()
@@ -139,7 +139,7 @@ def test_mid_batch_failure_rolls_back_all_staged(conn):
     try:
         with conn.cursor() as cur:
             # an ambiguous pair (fuzzy band) forces the adjudicator to run
-            _seed(cur, f, [("Acme Systems", "Organization", None), ("Acme Solutions", "Organization", None)])
+            _seed(cur, f, [("Acme Systems", "Organization"), ("Acme Solutions", "Organization")])
         conn.commit()
 
         def boom(a, b):

@@ -39,6 +39,5 @@
     {"type": "locatedIn", "domain": ["Organization"], "range": ["Location"], "guidance": "An organization is located in a place."},
     {"type": "hasRating", "domain": ["FinancialInstrument"], "range": ["CreditRating"], "guidance": "An instrument carries a credit rating."},
     {"type": "denominatedIn", "domain": ["FinancialInstrument"], "range": ["Currency"], "guidance": "An instrument is denominated in a currency."}
-  ],
-  "gazetteer_link_types": ["Organization", "Bank", "InvestmentAdviser", "BrokerDealer", "InvestmentFund", "RegulatoryAgency", "Corporation"]
+  ]
 }

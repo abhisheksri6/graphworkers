@@ -9,11 +9,12 @@ transaction** (ADR-0006).
 - **Capability:** `entity_canonicalization` (variant-`None`; queue == task-stem == capability_type).
 - **Pipeline:** normalize (lowercase, strip legal suffixes/punct → `normalized_form`) → block
   (own block + already-`canonicalized` rows sharing the block key) → **three-band match**
-  (auto-accept exact-normalized OR LEI-equal · auto-reject below the fuzzy floor · ambiguous band →
-  **LLM adjudication**) → cluster (union-find) → assign `canonical_id` (reuse an existing cluster on a
+  (auto-accept exact-normalized · auto-reject below the fuzzy floor · ambiguous band →
+  **LLM adjudication** — *the LEI-equal short-circuit is withdrawn at v11 with the gazetteer/
+  external-id plane*) → cluster (union-find) → assign `canonical_id` (reuse an existing cluster on a
   match to a canonicalized row; else **mint via `INSERT … ON CONFLICT (canonical_key) DO NOTHING
   RETURNING`** — race-safe) → reconcile type (most-specific per the pack's `parent` hierarchy) →
-  re-point edges. `canonical_key` = the LEI when present, else `type|normalized_form`.
+  re-point edges. `canonical_key` = `type|normalized_form`.
 
 ## Layout
 ```

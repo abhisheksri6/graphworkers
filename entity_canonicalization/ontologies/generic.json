@@ -19,6 +19,5 @@
     {"type": "Time", "parent": null, "spacy_labels": ["TIME"], "guidance": "Times smaller than a day."},
     {"type": "Quantity", "parent": null, "spacy_labels": ["QUANTITY"], "guidance": "Measurements, as of weight or distance."}
   ],
-  "relations": [],
-  "gazetteer_link_types": ["Organization"]
+  "relations": []
 }

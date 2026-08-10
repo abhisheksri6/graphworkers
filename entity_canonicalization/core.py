@@ -30,7 +30,6 @@ class Mention:
     entity_uid: str
     entity_type: str
     surface_form: str
-    external_id: Optional[str] = None
     normalized_form: str = ""
 
 
@@ -43,12 +42,11 @@ def normalize_surface(surface: str) -> str:
     return " ".join(tokens)
 
 
-def canonical_key(entity_type: str, normalized_form: str, external_id: Optional[str] = None) -> str:
-    """The UNIQUE key on kg_canonical_entities: the LEI when present (authoritative across string
-    variants), else ``<reconciled_type>|<normalized_form>``. Uses the RECONCILED cluster type so
-    chunk-boundary type inconsistency (F-CHUNK-2) doesn't split one real entity."""
-    if external_id:
-        return f"lei:{external_id}"
+def canonical_key(entity_type: str, normalized_form: str) -> str:
+    """The UNIQUE key on kg_canonical_entities: ``<reconciled_type>|<normalized_form>`` (*amended
+    v11 — the LEI-authoritative-key short-circuit is removed with the gazetteer/external-id
+    plane*). Uses the RECONCILED cluster type so chunk-boundary type inconsistency (F-CHUNK-2)
+    doesn't split one real entity."""
     return f"{entity_type}|{normalized_form}"
 
 
@@ -57,11 +55,9 @@ def fuzzy_score(a: str, b: str) -> float:
 
 
 def match_band(a: Mention, b: Mention, *, fuzzy_floor: float, fuzzy_ceiling: float) -> str:
-    """Three-band match (KG-AC-24): LEI-equal ⇒ accept regardless of string distance; two DIFFERENT
-    LEIs ⇒ reject; exact normalized ⇒ accept; fuzzy ≥ ceiling ⇒ accept; < floor ⇒ reject; between ⇒
-    ambiguous (→ LLM)."""
-    if a.external_id and b.external_id:
-        return ACCEPT if a.external_id == b.external_id else REJECT
+    """Three-band match (KG-AC-24, *amended v11 — the LEI-equal short-circuit is removed with the
+    gazetteer/external-id plane*): exact normalized ⇒ accept; fuzzy ≥ ceiling ⇒ accept; < floor ⇒
+    reject; between ⇒ ambiguous (→ LLM)."""
     if a.normalized_form and a.normalized_form == b.normalized_form:
         return ACCEPT
     score = fuzzy_score(a.normalized_form, b.normalized_form)
@@ -73,10 +69,9 @@ def match_band(a: Mention, b: Mention, *, fuzzy_floor: float, fuzzy_ceiling: flo
 
 
 def block_key(m: Mention) -> str:
-    """Coarse candidate-generation key (blocking): the LEI when present, else the first token of the
-    normalized form. Bounds pairwise comparison to likely matches (KG-AC-25 — batch-scoped)."""
-    if m.external_id:
-        return f"lei:{m.external_id}"
+    """Coarse candidate-generation key (blocking): the first token of the normalized form (*amended
+    v11 — the LEI branch is removed with the gazetteer/external-id plane*). Bounds pairwise
+    comparison to likely matches (KG-AC-25 — batch-scoped)."""
     first = m.normalized_form.split(" ", 1)[0] if m.normalized_form else ""
     return f"tok:{first}"
 
@@ -131,14 +126,6 @@ def reconcile_type(types: Sequence[str], pack) -> Optional[str]:
     if resolved is not None:
         return resolved
     return types[0] if types else None
-
-
-def cluster_external_id(cluster: List[Mention]) -> Optional[str]:
-    """The cluster's LEI, if any mention carries one (LEI is authoritative)."""
-    for m in cluster:
-        if m.external_id:
-            return m.external_id
-    return None
 
 
 def aggregate_edge_group(rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:

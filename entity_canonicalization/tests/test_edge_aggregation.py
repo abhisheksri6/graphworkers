@@ -41,14 +41,14 @@ def conn():
     c.close()
 
 
-def _seed_entity(cur, folder_id, uid, surface, etype, ext=None):
+def _seed_entity(cur, folder_id, uid, surface, etype):
     cur.execute(
         """INSERT INTO public.kg_entities
-               (folder_id, entity_uid, entity_type, surface_form, external_id,
+               (folder_id, entity_uid, entity_type, surface_form,
                 ontology_pack, ontology_version, stage)
-           VALUES (%s,%s,%s,%s,%s,'fibo_core','1.0','staged')
+           VALUES (%s,%s,%s,%s,'fibo_core','1.0','staged')
            ON CONFLICT (entity_uid) DO NOTHING""",
-        (folder_id, uid, etype, surface, ext),
+        (folder_id, uid, etype, surface),
     )
 
 
