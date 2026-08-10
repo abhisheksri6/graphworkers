@@ -17,7 +17,6 @@ class CanonicalNode:
     canonical_id: str
     entity_type: str
     normalized_form: Optional[str] = None
-    external_id: Optional[str] = None
     provenance: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -46,13 +45,12 @@ def build_node_statement(node: CanonicalNode) -> Tuple[str, Dict[str, Any]]:
     cypher = (
         f"MERGE (n:`{label}` {{canonical_id: $canonical_id}}) "
         "SET n.entity_type = $entity_type, n.normalized_form = $normalized_form, "
-        "n.external_id = $external_id, n.provenance = $provenance"
+        "n.provenance = $provenance"
     )
     params = {
         "canonical_id": node.canonical_id,
         "entity_type": node.entity_type,
         "normalized_form": node.normalized_form,
-        "external_id": node.external_id,
         "provenance": _json_provenance(node.provenance),
     }
     return cypher, params

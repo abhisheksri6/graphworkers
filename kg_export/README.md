@@ -6,7 +6,8 @@ downstream of a `hold` barrier: reads the **canonicalized** Postgres graph and p
 Postgres stays the plane of record; dropping + re-exporting reproduces it exactly.
 
 - One Neo4j **node per `canonical_id`** (labelled by the reconciled pack type; properties carry the
-  normalized form, external_id/LEI, and provenance). One **relationship per canonical edge**
+  normalized form and provenance — *the `external_id`/LEI property is dropped at spec v11 with the
+  gazetteer/external-id plane*). One **relationship per canonical edge**
   (mention-edges collapse to the canonical endpoints). **Idempotent `MERGE`** (KG-AC-29) →
   rebuildable (KG-AC-28) → round-trip parity with the Postgres canonical graph (KG-AC-27).
 - Callback → the generic `/kg-export/worker-results` (the B12 single-instance handler; FinOps +

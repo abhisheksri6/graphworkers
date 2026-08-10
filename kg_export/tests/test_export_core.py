@@ -9,7 +9,7 @@ from core import CanonicalEdge, CanonicalNode, build_export_statements, run_expo
 
 def _graph():
     nodes = [
-        CanonicalNode("c1", "Bank", "acme", external_id="LEI-1", provenance={"folders": ["f1"]}),
+        CanonicalNode("c1", "Bank", "acme", provenance={"folders": ["f1"]}),
         CanonicalNode("c2", "Bond", "acme 2030", provenance={"folders": ["f1"]}),
         CanonicalNode("c3", "Person", "jane roe", provenance={"folders": ["f1"]}),
     ]
@@ -39,9 +39,9 @@ def test_roundtrip_one_merge_per_node_and_edge():
     assert len(node_runs) == 3 and len(rel_runs) == 2
     # the canonical graph maps 1:1 to the exported statements (round-trip)
     assert {r[1]["canonical_id"] for r in node_runs} == {"c1", "c2", "c3"}
-    # node labels come from the reconciled type; the LEI + provenance ride as properties
+    # node labels come from the reconciled type; provenance rides as a property
     bank = next(r for r in node_runs if r[1]["canonical_id"] == "c1")
-    assert "`Bank`" in bank[0] and bank[1]["external_id"] == "LEI-1"
+    assert "`Bank`" in bank[0] and "external_id" not in bank[1]
 
 
 @pytest.mark.ac("KG-AC-29")

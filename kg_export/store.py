@@ -16,12 +16,12 @@ from typing import List, Optional, Sequence, Tuple
 from core import CanonicalEdge, CanonicalNode
 
 _NODE_SQL = """
-    SELECT ce.canonical_id, ce.entity_type, ce.normalized_form, ce.external_id,
+    SELECT ce.canonical_id, ce.entity_type, ce.normalized_form,
            array_agg(DISTINCT e.folder_id) AS folders, count(*) AS mention_count
       FROM public.kg_entities e
       JOIN public.kg_canonical_entities ce ON ce.canonical_id = e.canonical_id
      WHERE e.stage = 'canonicalized' {node_filter}
-     GROUP BY ce.canonical_id, ce.entity_type, ce.normalized_form, ce.external_id
+     GROUP BY ce.canonical_id, ce.entity_type, ce.normalized_form
      ORDER BY ce.canonical_id
 """
 
@@ -42,8 +42,8 @@ def read_canonical_graph(
         cur.execute(_NODE_SQL.format(node_filter=""))
     nodes = [
         CanonicalNode(
-            canonical_id=str(r[0]), entity_type=r[1], normalized_form=r[2], external_id=r[3],
-            provenance={"folders": [f for f in (r[4] or []) if f], "mentions": r[5]},
+            canonical_id=str(r[0]), entity_type=r[1], normalized_form=r[2],
+            provenance={"folders": [f for f in (r[3] or []) if f], "mentions": r[4]},
         )
         for r in cur.fetchall()
     ]
