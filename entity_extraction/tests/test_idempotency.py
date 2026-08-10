@@ -37,8 +37,7 @@ class _DbShim:
 
 def _build_rows(folder_id):
     cands = [
-        Candidate("Acme Corp", "Organization", "c1", "gazetteer", 0, 9,
-                  external_id="5493001KJTIIGC8Y1R12", external_id_source="gleif_lei"),
+        Candidate("Acme Corp", "Organization", "c1", "regex", 0, 9),
         Candidate("Jane Roe", "Person", "c1", "spacy", 20, 28),
         Candidate("Acme 5% 2030", "Bond", "c1", "llm", 40, 52),
     ]
@@ -53,7 +52,7 @@ def _build_rows(folder_id):
 
 def _snapshot(cur, folder_id):
     cur.execute("""SELECT entity_uid, entity_type, surface_form, folder_id, run_id, dag_id,
-                          ontology_pack, ontology_version, extractor, external_id, external_id_source, stage
+                          ontology_pack, ontology_version, extractor, stage
                      FROM public.kg_entities WHERE folder_id=%s ORDER BY entity_uid""", (folder_id,))
     ents = cur.fetchall()
     cur.execute("""SELECT edge_uid, relation_type, src_entity_uid, dst_entity_uid, folder_id
@@ -91,10 +90,7 @@ def test_partition_replace_idempotent_with_provenance(conn):
         for row in ents1:
             (_uid, _t, _s, f, r, d, pack, ver, extractor, *_rest) = row
             assert f == folder_id and r == "run-1" and d == "dag-1"
-            assert pack == "fibo_core" and ver == "1.0" and extractor in ("gazetteer", "spacy", "llm")
-        # the gazetteer row carries the LEI external_id
-        gaz = [row for row in ents1 if row[8] == "gazetteer"][0]
-        assert gaz[9] == "5493001KJTIIGC8Y1R12" and gaz[10] == "gleif_lei"
+            assert pack == "fibo_core" and ver == "1.0" and extractor in ("regex", "spacy", "llm")
 
         # Run 2 (re-execute for the SAME folder; run_id differs) -> identical entity/edge SET (KG-AC-10)
         partition_replace(_DbShim(conn), folder_id, "run-2", "dag-1", str(uuid.uuid4()), ent_rows, edge_rows)

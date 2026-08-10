@@ -52,7 +52,6 @@ class EntityExtractionSettings(BaseSettings):
     runtime_worker_results_url: str = Field(default="", validation_alias=AliasChoices("RUNTIME_WORKER_RESULTS_URL"))
     blob_storage_uri: str = Field(default="", validation_alias=AliasChoices("BLOB_STORAGE_URI"))
     spacy_model_path: str = Field(default="", validation_alias=AliasChoices("SPACY_MODEL_PATH"))
-    gazetteer_db_path: str = Field(default="", validation_alias=AliasChoices("GAZETTEER_DB_PATH"))
     guardrails_url: str = Field(default="", validation_alias=AliasChoices("GUARDRAILS_URL"))
     queues: str = Field(default="entity_extraction,runtime_entity_extraction",
                         validation_alias=AliasChoices("ENTITY_EXTRACTION_QUEUES", "CELERY_QUEUE"))
@@ -92,18 +91,6 @@ def _entity_extraction_boot_preflight(**_) -> None:
     preflight_spacy_model(settings)
 
 
-def _load_gazetteer(config: ExtractionConfig, db_path: str):
-    """Return the by-copy gazetteer index (C6) when enabled + available, else None (opt-in no-op)."""
-    if not config.gazetteer_enabled:
-        return None
-    try:
-        from gazetteers import load_gazetteer  # C6
-        return load_gazetteer(db_path or None)
-    except Exception as exc:  # noqa: BLE001 — index/module absent -> gazetteer layer is a non-fatal no-op
-        logger.warning("gazetteer enabled but unavailable (%s) — skipping gazetteer layer", exc)
-        return None
-
-
 def _guardrails_screen(config: ExtractionConfig, run_id, folder_id) -> Optional[Callable]:
     """A once-per-batch guardrails screen (KG-AC-17) built from the sidecar, or None when unset."""
     policy = config.__dict__.get("guardrail_policy") if hasattr(config, "__dict__") else None
@@ -137,7 +124,7 @@ def _post_callback(http_post: Callable, url: str, payload: Dict[str, Any]) -> No
 
 def process_folder(task_id, folder_id, entity_extraction_config, dag_id, run_id, *,
                    storage, db, http_post, worker_results_url, spacy_model_path="",
-                   gazetteer=None, guardrails_screen=None, llm_client=None) -> Dict[str, Any]:
+                   guardrails_screen=None, llm_client=None) -> Dict[str, Any]:
     """Task body (deps injected). Reads chunks (empty -> loud fail, KG-AC-7), runs the pipeline,
     partition-replaces the folder's kg rows in the task transaction, and ALWAYS posts a callback.
     Per-folder isolation (KG-AC-19): any failure here fails only THIS folder's task."""
@@ -152,13 +139,11 @@ def process_folder(task_id, folder_id, entity_extraction_config, dag_id, run_id,
             llm_client = build_llm_client(config.connection_id)
             if llm_client is None:
                 raise RuntimeError("entity_extraction: engine=llm requires an LLM connection_id")
-        if gazetteer is None:
-            gazetteer = _load_gazetteer(config, settings.gazetteer_db_path)
         if guardrails_screen is None:
             guardrails_screen = _guardrails_screen(config, run_id, folder_id)
 
         ent_rows, edge_rows, summary, usage, _blocked = run_pipeline(
-            chunks, config, pack, folder_id=folder_id, gazetteer=gazetteer,
+            chunks, config, pack, folder_id=folder_id,
             spacy_model_path=spacy_model_path or settings.spacy_model_path,
             llm_client=llm_client, guardrails_screen=guardrails_screen,
         )
@@ -205,7 +190,6 @@ def runtime_entity_extraction_task(task_id, sample, entity_extraction_config):
             llm_client = build_llm_client(config.connection_id)
         payload = runtime.run_preview(
             entity_extraction_config, sample.get("text"),
-            gazetteer=_load_gazetteer(config, settings.gazetteer_db_path),
             spacy_model_path=settings.spacy_model_path, llm_client=llm_client,
         )
     except Exception as exc:  # noqa: BLE001 — worker boundary: fail loud, POST the error

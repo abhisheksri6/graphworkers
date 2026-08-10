@@ -42,7 +42,7 @@ def partition_replace(db, folder_id: str, run_id: Any, dag_id: Any, source_task_
                     folder_id, run_id, dag_id, source_task_id,
                     e["entity_uid"], e["entity_type"], e["surface_form"], e.get("source_chunk_id"),
                     e.get("span_start"), e.get("span_end"), e.get("occurrence_idx", 0),
-                    e.get("confidence", 1.0), e.get("external_id"), e.get("external_id_source"),
+                    e.get("confidence", 1.0),
                     e.get("extractor"), e.get("ontology_pack"), e.get("ontology_version"),
                     e.get("model_id"), e.get("stage", "staged"),
                 )
@@ -51,14 +51,13 @@ def partition_replace(db, folder_id: str, run_id: Any, dag_id: Any, source_task_
             returned = execute_values(cur, """
                 INSERT INTO public.kg_entities
                   (folder_id, run_id, dag_id, source_task_id, entity_uid, entity_type, surface_form,
-                   source_chunk_id, span_start, span_end, occurrence_idx, confidence, external_id,
-                   external_id_source, extractor, ontology_pack, ontology_version, model_id, stage)
+                   source_chunk_id, span_start, span_end, occurrence_idx, confidence,
+                   extractor, ontology_pack, ontology_version, model_id, stage)
                 VALUES %s
                 ON CONFLICT (entity_uid) DO UPDATE SET
                   entity_type=EXCLUDED.entity_type, surface_form=EXCLUDED.surface_form,
                   run_id=EXCLUDED.run_id, dag_id=EXCLUDED.dag_id, source_task_id=EXCLUDED.source_task_id,
-                  confidence=EXCLUDED.confidence, external_id=EXCLUDED.external_id,
-                  external_id_source=EXCLUDED.external_id_source, extractor=EXCLUDED.extractor,
+                  confidence=EXCLUDED.confidence, extractor=EXCLUDED.extractor,
                   ontology_pack=EXCLUDED.ontology_pack, ontology_version=EXCLUDED.ontology_version,
                   model_id=EXCLUDED.model_id, stage=EXCLUDED.stage
                 RETURNING id, entity_uid

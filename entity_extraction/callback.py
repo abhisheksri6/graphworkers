@@ -14,9 +14,10 @@ import logging
 from typing import Any, Dict, List, Optional
 
 # The KG-AC-9 scalar state summary promoted per folder (order-stable for the shared fixture).
+# *Amended v11 — `linked_count` is dropped with the gazetteer capability.*
 _STATE_SCALARS = (
     "entity_count", "edge_count", "distinct_types", "top_entities",
-    "ontology_pack", "ontology_version", "unmapped_type_count", "linked_count",
+    "ontology_pack", "ontology_version", "unmapped_type_count",
 )
 
 
@@ -56,10 +57,9 @@ def log_result_summary(logger: logging.Logger, folder_id: str, chunk_count: int,
     """Log counts ONLY — never document text or entity surfaces (KG-AC-17: no content in logs)."""
     logger.info(
         "entity_extraction.done folder_id=%s chunks=%s entities=%s edges=%s distinct_types=%s "
-        "unmapped_types=%s linked=%s pack=%s/%s",
+        "unmapped_types=%s pack=%s/%s",
         folder_id, chunk_count,
         (summary or {}).get("entity_count"), (summary or {}).get("edge_count"),
         (summary or {}).get("distinct_types"), (summary or {}).get("unmapped_type_count"),
-        (summary or {}).get("linked_count"), (summary or {}).get("ontology_pack"),
-        (summary or {}).get("ontology_version"),
+        (summary or {}).get("ontology_pack"), (summary or {}).get("ontology_version"),
     )

@@ -149,7 +149,7 @@ def test_spacy_engine_yields_zero_relations_and_makes_no_llm_call():
     # (mirrors SpacyNerStrategy's own nlp= param) so this test needs no real by-copy spaCy model.
     candidates, relations = run_graph_extraction(
         [Chunk("c1", "Acme Corp raised funds.")], cfg, generic,
-        spacy_nlp=_FakeNlp(), llm_client=None, gazetteer=None,
+        spacy_nlp=_FakeNlp(), llm_client=None,
     )
     assert {c.entity_type for c in candidates} == {"Organization"}
     assert relations == []

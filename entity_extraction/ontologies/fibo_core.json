@@ -40,10 +40,6 @@
     {"type": "hasRating", "domain": ["FinancialInstrument"], "range": ["CreditRating"], "guidance": "An instrument carries a credit rating."},
     {"type": "denominatedIn", "domain": ["FinancialInstrument"], "range": ["Currency"], "guidance": "An instrument is denominated in a currency."}
   ],
-  "gazetteer_link_types": ["Organization", "Bank", "InvestmentAdviser", "BrokerDealer", "InvestmentFund", "RegulatoryAgency", "Corporation"],
-  "regex_patterns": [
-    {"entity_type": "Organization", "pattern": "\\b[A-Z0-9]{18}[0-9]{2}\\b", "checksum": "lei", "_comment": "ISO 17442 LEI shape: 18 alnum chars + 2 check digits. Illustrative sample (ADR-0013/KG-AC-54) — owner-reviewable, mirrors the C5 GATE-2 pack-definition review."}
-  ],
   "dep_patterns": [
     {"relation_type": "employs", "src_node": "subject", "dst_node": "object", "_comment": "SVO: '<Organization> employs/hires <Person>'.",
      "pattern": [

@@ -47,11 +47,28 @@ def test_state_scalar_outputs_present():
     # the KG-AC-9 state-plane scalar summary the callback promotes
     for field in (
         "entity_count", "edge_count", "distinct_types",
-        "ontology_pack", "ontology_version", "unmapped_type_count", "linked_count",
+        "ontology_pack", "ontology_version", "unmapped_type_count",
     ):
         assert out[field]["always_present"] is True, field
     # top_entities is bounded top-N and may be empty -> not always_present
     assert out["top_entities"]["always_present"] is False
+
+
+# ---- v11 (spec v11, KG-AC-9/12): gazetteer config surface + linked_count withdrawn ----
+@pytest.mark.ac("KG-AC-12")
+def test_gazetteer_input_fields_absent():
+    inp = CAPABILITY_SCHEMA["input_fields"]
+    for key in (
+        "entity_extraction_config.gazetteer_enabled",
+        "entity_extraction_config.gazetteer_sources",
+        "entity_extraction_config.entity_linking",
+    ):
+        assert key not in inp, key
+
+
+@pytest.mark.ac("KG-AC-9")
+def test_linked_count_output_field_absent():
+    assert "linked_count" not in CAPABILITY_SCHEMA["output_fields"]
 
 
 # ---- KG-AC-45 (evolve v5): relation_engine field removed, coreference_enabled added ----

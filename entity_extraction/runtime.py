@@ -15,13 +15,13 @@ _RUNTIME_FOLDER = "__runtime__"
 
 
 def run_preview(config_dict: Dict[str, Any], sample_text: Optional[str], *,
-                gazetteer=None, spacy_model_path=None, llm_client=None) -> Dict[str, Any]:
+                spacy_model_path=None, llm_client=None) -> Dict[str, Any]:
     config = ExtractionConfig.from_dict(config_dict)
     pack = load_pack(config.ontology_pack)
     chunks = [Chunk(chunk_id="sample", text=sample_text or "")]
     ent_rows, edge_rows, summary, usage, _blocked = run_pipeline(
         chunks, config, pack, folder_id=_RUNTIME_FOLDER,
-        gazetteer=gazetteer, spacy_model_path=spacy_model_path, llm_client=llm_client,
+        spacy_model_path=spacy_model_path, llm_client=llm_client,
     )
     surface_by_uid = {e["entity_uid"]: e["surface_form"] for e in ent_rows}
     return {
@@ -29,7 +29,7 @@ def run_preview(config_dict: Dict[str, Any], sample_text: Optional[str], *,
         "entities": [
             {"surface_form": e["surface_form"], "entity_type": e["entity_type"],
              "span_start": e["span_start"], "span_end": e["span_end"],
-             "external_id": e.get("external_id"), "confidence": e["confidence"]}
+             "confidence": e["confidence"]}
             for e in ent_rows
         ],
         "relations": [

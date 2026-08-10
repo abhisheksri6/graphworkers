@@ -1,8 +1,9 @@
 # entity_extraction worker
 
-Knowledge-graph **write path — extraction** (specs/knowledge-graph v2). Reads `text_chunks` for a
-folder, runs a layered ensemble (rules/gazetteer › spaCy › LLM, ADR-0009) governed by a closed
-ontology pack (ADR-0008), and writes typed, provenance-stamped `kg_entities`/`kg_edges` rows
+Knowledge-graph **write path — extraction** (specs/knowledge-graph v11). Reads `text_chunks` for a
+folder, runs a layered ensemble (regex › spaCy › LLM, ADR-0009 — the gazetteer tier is withdrawn at
+v11) governed by a closed ontology pack (ADR-0008), and writes typed, provenance-stamped
+`kg_entities`/`kg_edges` rows
 (`stage='staged'`) to Postgres — then POSTs a thin scalar summary to the backend callback.
 
 - **Capability:** `entity_extraction` (variant-`None`; `queue_name == capability_type == task-stem`
@@ -15,9 +16,8 @@ ontology pack (ADR-0008), and writes typed, provenance-stamped `kg_entities`/`kg
 ```
 capability_schema.py   # import-light CAPABILITY_SCHEMA (F0 seed-parity, KG-AC-21)
 core.py                # pure: chunks + config + pack -> mentions + relations + bounded top-N (no Celery/DB/net)
-strategies/            # base registry+precedence; rules_gazetteer; spacy_ner; llm_ner; rules_re
+strategies/            # base registry+precedence; rules_entities; spacy_ner; llm_ner; rules_relations
 ontologies/            # pack schema + loader (DAG) + samples generic.json / fibo_core.json
-gazetteers/            # GLEIF/LEI by-copy SQLite index + EntityRuler build (opt-in)
 clients.py             # connection-profile decrypt -> Bedrock (Nova + anthropic bodies); fail-loud
 store.py               # read_chunks + one-transaction partition-replace (ON CONFLICT entity_uid/edge_uid)
 callback.py            # pure callback builders + the shared canonical fixture (byte-identical to backend)
@@ -36,10 +36,6 @@ celery -A entity_extraction_worker worker -Q entity_extraction,runtime_entity_ex
 ## By-copy assets (offline, no network — ADR-0008/0009)
 - **spaCy model** `en_core_web_lg-3.7.1` → copy into `SPACY_MODEL_PATH` (default `./models/en_core_web_lg`).
   Loaded offline via `spacy.load(SPACY_MODEL_PATH)` — never downloaded at container start (KG-AC-15).
-- **GLEIF/LEI gazetteer** — build the by-copy SQLite index from the public CC0 `s3://gleif/` dataset
-  at image-build time (see `gazetteers/README`). ~512 MB compressed source; indexed, not held in
-  memory. Opt-in (`gazetteer_enabled`, default off). Only CC0/open sources ship — **no CUSIP/ISIN**
-  (proprietary) — KG-AC-13.
 
 ## Governance
 Torch-free (`pip check` carries no `torch`; KG-AC-18). Naming: WORKER_NAMING.md (variant-`None`

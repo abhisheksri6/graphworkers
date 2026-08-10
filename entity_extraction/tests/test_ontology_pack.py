@@ -27,10 +27,12 @@ def test_shipped_packs_load_and_validate():
 @pytest.mark.ac("KG-AC-55")
 def test_fibo_custom_shipped_patterns_load_and_validate():
     # 2026-08-07: fibo_custom v1.1 gains rules-based entity/relation patterns (was v1.0, none).
+    # v11 (2026-08-08): the LEI identifier pattern is withdrawn with the gazetteer/external-id
+    # plane (KG-AC-54 amended) — Email (not an identifier) is unaffected and stays.
     fibo_custom = load_pack("fibo_custom")
     assert fibo_custom.version == "1.1"
-    assert len(fibo_custom.regex_patterns) == 2  # LEI (Organization), Email
-    assert {rp.entity_type for rp in fibo_custom.regex_patterns} == {"Organization", "Email"}
+    assert len(fibo_custom.regex_patterns) == 1  # Email only
+    assert {rp.entity_type for rp in fibo_custom.regex_patterns} == {"Email"}
     assert len(fibo_custom.dep_patterns) == 3  # worksFor (join/found + works-for), controls
     assert {dp.relation_type for dp in fibo_custom.dep_patterns} == {"worksFor", "controls"}
     # 'owns' is deliberately NOT covered (multi-type range, out of scope — see rules_relations.py).
@@ -64,7 +66,7 @@ def test_spacy_label_mapping():
 def test_version_mandatory():
     with pytest.raises(OntologyError):
         Pack(name="x", version="", description="", entity_types=[EntityType("A", None, [], "", None)],
-             relations=[], gazetteer_link_types=[])
+             relations=[])
 
 
 @pytest.mark.ac("KG-AC-14")
@@ -73,14 +75,14 @@ def test_hierarchy_must_be_a_dag():
     with pytest.raises(OntologyError):
         Pack(name="x", version="1", description="",
              entity_types=[EntityType("A", "B", [], "", None), EntityType("B", "A", [], "", None)],
-             relations=[], gazetteer_link_types=[])
+             relations=[])
 
 
 @pytest.mark.ac("KG-AC-14")
 def test_parent_must_be_declared():
     with pytest.raises(OntologyError):
         Pack(name="x", version="1", description="",
-             entity_types=[EntityType("A", "Ghost", [], "", None)], relations=[], gazetteer_link_types=[])
+             entity_types=[EntityType("A", "Ghost", [], "", None)], relations=[])
 
 
 # ---- type reconciliation hierarchy (KG-AC-23) ----------------------------
@@ -113,7 +115,7 @@ def test_three_level_chain_most_specific():
     p = Pack(name="x", version="1", description="",
              entity_types=[EntityType("A", None, [], "", None), EntityType("B", "A", [], "", None),
                            EntityType("C", "B", [], "", None)],
-             relations=[], gazetteer_link_types=[])
+             relations=[])
     assert p.most_specific_type(["A", "B", "C"]) == "C"
     assert p.most_specific_type(["A", "C"]) == "C"
 
@@ -121,10 +123,13 @@ def test_three_level_chain_most_specific():
 # ---- J1 (spec v8): regex_patterns / dep_patterns — ADR-0012/0013 -----------
 @pytest.mark.ac("KG-AC-54")
 def test_regex_patterns_load_and_validate():
-    fibo = load_pack("fibo_core")
-    assert len(fibo.regex_patterns) >= 1
-    rp = fibo.regex_patterns[0]
-    assert rp.entity_type in fibo.entity_types
+    # v11 (2026-08-08): fibo_core's only regex_pattern was the LEI identifier, withdrawn with the
+    # gazetteer/external-id plane — fibo_custom's non-identifier Email pattern proves the shipped
+    # regex_patterns machinery still loads and validates (KG-AC-54's amended "mechanism survives").
+    fibo_custom = load_pack("fibo_custom")
+    assert len(fibo_custom.regex_patterns) >= 1
+    rp = fibo_custom.regex_patterns[0]
+    assert rp.entity_type in fibo_custom.entity_types
     import re
     re.compile(rp.pattern)  # must be a valid regex
 
@@ -133,7 +138,7 @@ def test_regex_patterns_load_and_validate():
 def test_regex_pattern_undeclared_type_fails_loud():
     with pytest.raises(OntologyError):
         Pack(name="x", version="1", description="",
-             entity_types=[EntityType("A", None, [], "", None)], relations=[], gazetteer_link_types=[],
+             entity_types=[EntityType("A", None, [], "", None)], relations=[],
              regex_patterns=[RegexPattern(entity_type="Ghost", pattern=r"\d+")])
 
 
@@ -141,7 +146,7 @@ def test_regex_pattern_undeclared_type_fails_loud():
 def test_regex_pattern_invalid_regex_fails_loud():
     with pytest.raises(OntologyError):
         Pack(name="x", version="1", description="",
-             entity_types=[EntityType("A", None, [], "", None)], relations=[], gazetteer_link_types=[],
+             entity_types=[EntityType("A", None, [], "", None)], relations=[],
              regex_patterns=[RegexPattern(entity_type="A", pattern="(unclosed")])
 
 
@@ -149,7 +154,7 @@ def test_regex_pattern_invalid_regex_fails_loud():
 def test_regex_pattern_unknown_checksum_fails_loud():
     with pytest.raises(OntologyError):
         Pack(name="x", version="1", description="",
-             entity_types=[EntityType("A", None, [], "", None)], relations=[], gazetteer_link_types=[],
+             entity_types=[EntityType("A", None, [], "", None)], relations=[],
              regex_patterns=[RegexPattern(entity_type="A", pattern=r"\d+", checksum="bogus")])
 
 
@@ -179,7 +184,7 @@ def _pack_with_relation(dep_patterns):
         name="x", version="1", description="",
         entity_types=[EntityType("Organization", None, [], "", None), EntityType("Person", None, [], "", None)],
         relations=[Relation("employs", ["Organization"], ["Person"], "")],
-        gazetteer_link_types=[], dep_patterns=dep_patterns,
+        dep_patterns=dep_patterns,
     )
 
 

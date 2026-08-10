@@ -25,7 +25,7 @@ def _pack(dep_patterns):
         name="x", version="1", description="",
         entity_types=[EntityType("Organization", None, [], "", None), EntityType("Person", None, [], "", None)],
         relations=[PackRelation("employs", ["Organization"], ["Person"], "")],
-        gazetteer_link_types=[], dep_patterns=dep_patterns,
+        dep_patterns=dep_patterns,
     )
 
 
@@ -34,7 +34,7 @@ def _worksfor_pack(dep_patterns):
         name="x", version="1", description="",
         entity_types=[EntityType("Organization", None, [], "", None), EntityType("Person", None, [], "", None)],
         relations=[PackRelation("worksFor", ["Person"], ["Organization"], "")],
-        gazetteer_link_types=[], dep_patterns=dep_patterns,
+        dep_patterns=dep_patterns,
     )
 
 

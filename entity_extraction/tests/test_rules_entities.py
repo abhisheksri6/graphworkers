@@ -60,7 +60,6 @@ def _lei_pack():
     return Pack(
         name="x", version="1", description="",
         entity_types=[EntityType("Organization", None, [], "", None)], relations=[],
-        gazetteer_link_types=[],
         regex_patterns=[RegexPattern(entity_type="Organization", pattern=r"\b[A-Z0-9]{18}[0-9]{2}\b", checksum="lei")],
     )
 
@@ -93,7 +92,6 @@ def test_isin_checksum_kind_also_supported():
     pack = Pack(
         name="x", version="1", description="",
         entity_types=[EntityType("FinancialInstrument", None, [], "", None)], relations=[],
-        gazetteer_link_types=[],
         regex_patterns=[RegexPattern(entity_type="FinancialInstrument", pattern=r"\b[A-Z]{2}[A-Z0-9]{9}[0-9]\b", checksum="isin")],
     )
     strategy = RulesEntitiesStrategy()
@@ -108,7 +106,6 @@ def test_no_checksum_accepts_any_regex_match():
     pack = Pack(
         name="x", version="1", description="",
         entity_types=[EntityType("Date", None, [], "", None)], relations=[],
-        gazetteer_link_types=[],
         regex_patterns=[RegexPattern(entity_type="Date", pattern=r"\b\d{4}-\d{2}-\d{2}\b")],
     )
     strategy = RulesEntitiesStrategy()
@@ -122,7 +119,6 @@ def test_multiple_matches_across_chunks():
     pack = Pack(
         name="x", version="1", description="",
         entity_types=[EntityType("Date", None, [], "", None)], relations=[],
-        gazetteer_link_types=[],
         regex_patterns=[RegexPattern(entity_type="Date", pattern=r"\b\d{4}-\d{2}-\d{2}\b")],
     )
     strategy = RulesEntitiesStrategy()
@@ -134,7 +130,6 @@ def test_multiple_matches_across_chunks():
 @pytest.mark.ac("KG-AC-54")
 def test_no_patterns_yields_no_candidates():
     pack = Pack(name="x", version="1", description="",
-                entity_types=[EntityType("Organization", None, [], "", None)], relations=[],
-                gazetteer_link_types=[])
+                entity_types=[EntityType("Organization", None, [], "", None)], relations=[])
     out = RulesEntitiesStrategy().extract([Chunk("c1", "Acme Corp filed a report.")], ExtractionConfig(), pack)
     assert out == []

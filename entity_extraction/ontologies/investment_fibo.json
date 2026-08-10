@@ -3,7 +3,7 @@
   "version": "1.0",
   "description": "Investment relationship ontology — investor/manager relationships, subscription agreements, fund commitments and their commercial terms. Translated 1:1 from the owner-supplied OWL/Turtle (http://example.org/investment#, :InvestmentRelationshipOntology) 2026-08-08: all 12 owl:Class declarations become entity types and all 11 owl:ObjectProperty declarations become relations with their declared rdfs:domain/rdfs:range preserved exactly. The 8 owl:DatatypeProperty declarations have NO representation here — see the _datatype_properties_note field below; that is a real coverage gap, not an oversight.",
   "_source_ontology": "owner-supplied OWL/Turtle, :InvestmentRelationshipOntology (@prefix : <http://example.org/investment#>)",
-  "_datatype_properties_note": "The source declares 8 owl:DatatypeProperty (agreementId, effectiveDate, fundName, commitmentAmount, currency, managementFee, performanceFee, lei). ADR-0007's entity_records contract stores typed MENTIONS with provenance, not per-entity attribute key/values, so a datatype property cannot be expressed as either an entity type or a relation. Consequence: amounts, dates, fee percentages and agreement identifiers in a document are NOT extractable under this pack. `lei` is the one partial exception — it is captured as an external_id via the LEI regex_pattern + gazetteer link below rather than as a datatype property. If these facts must land in the graph, the options are (a) add companion entity types (MonetaryAmount/Date/Percentage/Identifier) plus relations to carry them, or (b) extend the artifact contract with an attribute plane — (b) is an ADR-0007 change, not a pack edit.",
+  "_datatype_properties_note": "The source declares 8 owl:DatatypeProperty (agreementId, effectiveDate, fundName, commitmentAmount, currency, managementFee, performanceFee, lei). ADR-0007's entity_records contract stores typed MENTIONS with provenance, not per-entity attribute key/values, so a datatype property cannot be expressed as either an entity type or a relation. Consequence: amounts, dates, fee percentages, agreement identifiers, AND `lei` in a document are NOT extractable under this pack — v11 (2026-08-08) withdrew the gazetteer/external-id plane that previously captured `lei` as a partial exception, so no datatype property survives translation now. If these facts must land in the graph, the options are (a) add companion entity types (MonetaryAmount/Date/Percentage/Identifier) plus relations to carry them, or (b) extend the artifact contract with an attribute plane — (b) is an ADR-0007 change, not a pack edit.",
   "entity_types": [
     {
       "type": "InvestmentRelationship",
@@ -167,15 +167,6 @@
       "range": ["LegalEntity"],
       "guidance": "An investor is backed by a formally incorporated legal entity.",
       "iri": "http://example.org/investment#hasLegalEntity"
-    }
-  ],
-  "gazetteer_link_types": ["LegalEntity", "Investor", "InvestmentManager", "Fund"],
-  "regex_patterns": [
-    {
-      "entity_type": "LegalEntity",
-      "pattern": "\\b[A-Z0-9]{18}[0-9]{2}\\b",
-      "checksum": "lei",
-      "_comment": "ISO 17442 LEI shape (18 alnum + 2 check digits), checksum-validated at KG-AC-54. This is the ONLY datatype property from the source ontology (:lei on :LegalEntity) that survives translation, and it lands as an external_id on the mention rather than as an attribute. 2026-08-08."
     }
   ],
   "dep_patterns": []

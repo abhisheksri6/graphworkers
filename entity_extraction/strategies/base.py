@@ -1,27 +1,28 @@
 """Strategy registry + ensemble orchestration (ADR-0009; evolve v5 — relationship intelligence;
 evolve v8 ADR-0012 — composable additive deterministic layers).
 
-The entity ensemble is a precedence stack — gazetteer (opt-in) > regex (opt-in, evolve v8) > spaCy
-> LLM — all in-worker behind one queue. ``engine`` selects the primary layer: ``spacy`` (its OWN
-output is entity-only, KG-AC-44) or ``llm`` (entities AND relations from ONE schema-constrained
-call per chunk, KG-AC-43 — supersedes the v4 two-call NER-then-relation path and the withdrawn
-``relation_engine`` axis, KG-AC-16). Evolve v8 adds two OPT-IN, ADDITIVE deterministic layers that
-run alongside the primary layer regardless of which `engine` is chosen: ``rules_entities_enabled``
-(EntityRuler regex/phrase, KG-AC-54) and ``rules_relations_enabled`` (DependencyMatcher, KG-AC-55 —
-so a `spacy`-engine config CAN carry relations once this layer is on, superseding the old
-"no relation configuration is consulted" reading of KG-AC-44). The fixed precedence
-(core.LAYER_PRECEDENCE) resolves entity span overlaps at merge time (KG-AC-12); relations from
-multiple sources are unioned+deduped with `extractor` provenance (KG-AC-56, run_pipeline). Every
-emitted relation is validated against the pack's domain/range (KG-AC-43, KG-AC-16's surviving
-guarantee); a relation whose endpoint wasn't extracted is dropped at edge-build (dangling-endpoint
-drop). Unknown entity types are dropped + counted (closed vocabulary, KG-AC-14).
+The entity ensemble is a precedence stack — regex (opt-in, evolve v8) > spaCy > LLM (*amended v11:
+the gazetteer tier that used to sit above regex is withdrawn with that capability*) — all in-worker
+behind one queue. ``engine`` selects the primary layer: ``spacy`` (its OWN output is entity-only,
+KG-AC-44) or ``llm`` (entities AND relations from ONE schema-constrained call per chunk, KG-AC-43 —
+supersedes the v4 two-call NER-then-relation path and the withdrawn ``relation_engine`` axis,
+KG-AC-16). Evolve v8 adds two OPT-IN, ADDITIVE deterministic layers that run alongside the primary
+layer regardless of which `engine` is chosen: ``rules_entities_enabled`` (EntityRuler regex/phrase,
+KG-AC-54) and ``rules_relations_enabled`` (DependencyMatcher, KG-AC-55 — so a `spacy`-engine config
+CAN carry relations once this layer is on, superseding the old "no relation configuration is
+consulted" reading of KG-AC-44). The fixed precedence (core.LAYER_PRECEDENCE) resolves entity span
+overlaps at merge time (KG-AC-12); relations from multiple sources are unioned+deduped with
+`extractor` provenance (KG-AC-56, run_pipeline). Every emitted relation is validated against the
+pack's domain/range (KG-AC-43, KG-AC-16's surviving guarantee); a relation whose endpoint wasn't
+extracted is dropped at edge-build (dangling-endpoint drop). Unknown entity types are dropped +
+counted (closed vocabulary, KG-AC-14).
 
-Strategy dependencies (gazetteer index C6, LLM client C7, spaCy model/nlp C12) are INJECTED, so this
-module and the pure filters below are unit-testable with fakes today.
+Strategy dependencies (LLM client C7, spaCy model/nlp C12) are INJECTED, so this module and the
+pure filters below are unit-testable with fakes today.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, List, Optional, Tuple
 
 from candidate_pairs import enumerate_candidate_pairs
@@ -29,8 +30,6 @@ from core import (
     Candidate, Relation, assign_occurrence_indices, build_edge_records, build_entity_records,
     build_summary, entity_uid_key_map, filter_bare_pronouns, merge_candidates, merge_edge_records,
 )
-
-_DEFAULT_GAZETTEER_SOURCES = ["gleif_lei"]
 
 
 @dataclass
@@ -43,9 +42,6 @@ class Chunk:
 class ExtractionConfig:
     engine: str = "spacy"                 # spacy | llm
     ontology_pack: str = "generic"
-    gazetteer_enabled: bool = False
-    gazetteer_sources: List[str] = field(default_factory=lambda: list(_DEFAULT_GAZETTEER_SOURCES))
-    entity_linking: bool = False
     confidence_threshold: float = 0.0
     promote_top_n: int = 10
     entity_types: Optional[List[str]] = None   # optional subset filter over the pack's types
@@ -61,9 +57,6 @@ class ExtractionConfig:
         return cls(
             engine=d.get("engine", "spacy"),
             ontology_pack=d.get("ontology_pack", "generic"),
-            gazetteer_enabled=bool(d.get("gazetteer_enabled", False)),
-            gazetteer_sources=list(d.get("gazetteer_sources", _DEFAULT_GAZETTEER_SOURCES)),
-            entity_linking=bool(d.get("entity_linking", False)),
             confidence_threshold=float(d.get("confidence_threshold", 0.0)),
             promote_top_n=int(d.get("promote_top_n", 10)),
             entity_types=d.get("entity_types"),
@@ -111,24 +104,20 @@ def validate_relations(relations: List[Relation], pack) -> List[Relation]:
 
 
 # -- orchestration (impure — instantiates the injected strategies) ---------
-def run_graph_extraction(chunks: List[Chunk], config: ExtractionConfig, pack, *, gazetteer=None,
+def run_graph_extraction(chunks: List[Chunk], config: ExtractionConfig, pack, *,
                          spacy_model_path=None, spacy_nlp=None,
                          llm_client=None) -> Tuple[List[Candidate], List[Relation]]:
-    """KG-AC-43/44: the active entity layer(s) + relations for this config. Gazetteer (opt-in) is
-    always entity-only. ``engine=spacy`` is entity-only (zero relations, KG-AC-44). ``engine=llm``
-    emits entities AND relations from ONE call per chunk via ``LlmGraphStrategy`` (KG-AC-43).
-    ``spacy_nlp`` is a pass-through test seam mirroring ``SpacyNerStrategy``'s own ``nlp=`` param."""
+    """KG-AC-43/44: the active entity layer(s) + relations for this config. ``engine=spacy`` is
+    entity-only (zero relations, KG-AC-44). ``engine=llm`` emits entities AND relations from ONE
+    call per chunk via ``LlmGraphStrategy`` (KG-AC-43). ``spacy_nlp`` is a pass-through test seam
+    mirroring ``SpacyNerStrategy``'s own ``nlp=`` param."""
     from .llm_graph import LlmGraphStrategy
     from .rules_entities import RulesEntitiesStrategy
-    from .rules_gazetteer import RulesGazetteerStrategy
     from .rules_relations import RulesRelationsStrategy
     from .spacy_ner import SpacyNerStrategy, load_spacy_model
 
     candidates: List[Candidate] = []
     relations: List[Relation] = []
-
-    if config.gazetteer_enabled:
-        candidates += RulesGazetteerStrategy(gazetteer=gazetteer).extract(chunks, config, pack)
 
     if config.rules_entities_enabled:  # KG-AC-54 (evolve v8) — opt-in, additive
         candidates += RulesEntitiesStrategy().extract(chunks, config, pack)
@@ -168,7 +157,7 @@ def _screen_guardrails(candidates: List[Candidate], screen) -> Tuple[List[Candid
 
 
 def run_pipeline(chunks: List[Chunk], config: ExtractionConfig, pack, *, folder_id: str,
-                 gazetteer=None, spacy_model_path=None, spacy_nlp=None, llm_client=None,
+                 spacy_model_path=None, spacy_nlp=None, llm_client=None,
                  guardrails_screen=None):
     """End-to-end extraction orchestration (strategies injected; no Celery/DB/HTTP) — the testable
     core of the worker task. Returns (entity_rows, edge_rows, summary, usage, guardrails_blocked).
@@ -197,7 +186,7 @@ def run_pipeline(chunks: List[Chunk], config: ExtractionConfig, pack, *, folder_
         shared_nlp = load_spacy_model(spacy_model_path)
 
     candidates, raw_relations = run_graph_extraction(
-        chunks, config, pack, gazetteer=gazetteer, spacy_model_path=spacy_model_path,
+        chunks, config, pack, spacy_model_path=spacy_model_path,
         spacy_nlp=shared_nlp, llm_client=llm_client,
     )
     if config.coreference_enabled:

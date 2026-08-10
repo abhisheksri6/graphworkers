@@ -39,7 +39,7 @@ def test_usage_is_llm_only():
         folder_id="f", llm_client=_Llm(),
     )
     assert len(usage) == 1 and usage[0]["charge_category"] == "llm"
-    # a run with no LLM client carries no usage (gazetteer/spaCy/rules emit none)
+    # a run with no LLM client carries no usage (spaCy/regex/rules emit none)
     _e2, _ed2, _s2, usage2, _b2 = run_pipeline(
         [Chunk("c1", "x")], ExtractionConfig(engine="llm", ontology_pack="fibo_core"), pack,
         folder_id="f", llm_client=_Llm(),  # llm client present but the usage list is the client's own
@@ -51,7 +51,7 @@ def test_usage_is_llm_only():
 def test_log_summary_has_no_document_content(caplog):
     logger = logging.getLogger("entity_extraction_worker.test")
     summary = {"entity_count": 2, "edge_count": 1, "distinct_types": 2, "unmapped_type_count": 0,
-               "linked_count": 1, "ontology_pack": "fibo_core", "ontology_version": "1.0"}
+               "ontology_pack": "fibo_core", "ontology_version": "1.0"}
     with caplog.at_level(logging.INFO):
         log_result_summary(logger, "f1", 3, summary)
     text = caplog.text

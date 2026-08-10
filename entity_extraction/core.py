@@ -3,7 +3,7 @@
 Deterministic given fixed strategy output: the layer-precedence merge (KG-AC-12), the bounded
 top-N promotion (KG-AC-37), the deterministic uids (KG-AC-10), and the state-scalar summary
 (KG-AC-9) all live here so they are unit-testable without a broker, model, or DB. Strategy
-execution (spaCy / LLM / gazetteer) lives in ``strategies/`` and is injected — this module only
+execution (regex / spaCy / LLM) lives in ``strategies/`` and is injected — this module only
 transforms the candidates strategies produce.
 """
 from __future__ import annotations
@@ -13,8 +13,9 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
 # Layer precedence (ADR-0009 / KG-AC-12; evolve v8 ADR-0012 §2 inserts 'regex'): higher wins on
-# span overlap within a chunk. Order: gazetteer > regex > spaCy > LLM (clarify 2026-08-06).
-LAYER_PRECEDENCE: Dict[str, int] = {"gazetteer": 4, "regex": 3, "spacy": 2, "llm": 1}
+# span overlap within a chunk. Order: regex > spaCy > LLM (*amended v11 — the gazetteer tier that
+# used to sit above regex, clarify 2026-08-06, is withdrawn with that capability*).
+LAYER_PRECEDENCE: Dict[str, int] = {"regex": 3, "spacy": 2, "llm": 1}
 
 # KG-AC-48: bare pronouns/anaphora that must never survive as an entity when coreference resolution
 # is enabled -- a deterministic safety net independent of how well the coref rewrite performed.
@@ -31,12 +32,10 @@ class Candidate:
     surface_form: str
     entity_type: str
     source_chunk_id: str
-    layer: str  # 'gazetteer' | 'regex' | 'spacy' | 'llm'
+    layer: str  # 'regex' | 'spacy' | 'llm' (*'gazetteer' withdrawn at v11*)
     span_start: Optional[int] = None
     span_end: Optional[int] = None
     confidence: float = 1.0
-    external_id: Optional[str] = None
-    external_id_source: Optional[str] = None
     occurrence_idx: int = 0
 
 
@@ -73,7 +72,7 @@ def spans_overlap(a: Candidate, b: Candidate) -> bool:
 
 def merge_candidates(candidates: List[Candidate]) -> List[Candidate]:
     """KG-AC-12: within a ``source_chunk_id`` two candidates conflict iff their spans overlap;
-    the highest-precedence layer's candidate (gazetteer > spaCy > LLM) is kept WHOLE and the
+    the highest-precedence layer's candidate (regex > spaCy > LLM) is kept WHOLE and the
     overlapping others dropped; non-overlapping candidates from every layer are unioned.
     Deterministic for fixed input (stable original order preserved on output)."""
     by_chunk: Dict[str, List[Tuple[int, Candidate]]] = {}
@@ -168,8 +167,6 @@ def build_entity_records(
             "span_end": c.span_end,
             "occurrence_idx": c.occurrence_idx,
             "confidence": c.confidence,
-            "external_id": c.external_id,
-            "external_id_source": c.external_id_source,
             "extractor": c.layer,
             "ontology_pack": ontology_pack,
             "ontology_version": ontology_version,
@@ -272,9 +269,9 @@ def build_summary(
     entity_rows: List[Dict], edge_rows: List[Dict], ontology_pack: str, ontology_version: str,
     unmapped_type_count: int, promote_top_n: int = 10,
 ) -> Dict:
-    """The KG-AC-9 state-plane scalar summary the callback promotes (no bulk rows on state)."""
+    """The KG-AC-9 state-plane scalar summary the callback promotes (no bulk rows on state).
+    *Amended v11 — `linked_count` (gazetteer-link count) is dropped with that capability.*"""
     distinct_types = len({r["entity_type"] for r in entity_rows})
-    linked_count = sum(1 for r in entity_rows if r.get("external_id"))
     return {
         "entity_count": len(entity_rows),
         "edge_count": len(edge_rows),
@@ -283,7 +280,6 @@ def build_summary(
         "ontology_pack": ontology_pack,
         "ontology_version": ontology_version,
         "unmapped_type_count": unmapped_type_count,
-        "linked_count": linked_count,
     }
 
 

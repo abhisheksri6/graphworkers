@@ -1,7 +1,9 @@
 """KG-AC-54/55: proves the SHIPPED fibo_custom v1.1 rules-based patterns (not a hand-built clone)
-actually match real constructed text — regex entities (LEI checksum, Email) and dependency
-relations (worksFor via two distinct phrasings, controls). Uses the same hand-built-Doc technique
-as test_rules_relations.py (no trained model on this dev machine)."""
+actually match real constructed text — regex entities (Email) and dependency relations (worksFor
+via two distinct phrasings, controls). Uses the same hand-built-Doc technique as
+test_rules_relations.py (no trained model on this dev machine). The LEI identifier pattern this
+pack used to ship is withdrawn at spec v11 (2026-08-08, KG-AC-54 amended) with the gazetteer/
+external-id plane — see test_ontology_pack.py's regex_patterns count assertion for that removal."""
 import pytest
 import spacy
 from spacy.tokens import Doc
@@ -10,29 +12,6 @@ from ontologies import load_pack
 from strategies.base import Chunk, ExtractionConfig
 from strategies.rules_entities import RulesEntitiesStrategy
 from strategies.rules_relations import RulesRelationsStrategy
-
-# Independently-derived valid LEI (same technique as test_rules_entities.py — not imported from
-# the module under test).
-def _valid_lei(prefix18: str) -> str:
-    def letters_to_digits(s):
-        return "".join(ch if ch.isdigit() else str(ord(ch.upper()) - ord("A") + 10) for ch in s)
-    numeric = letters_to_digits(prefix18 + "00")
-    remainder = 0
-    for ch in numeric:
-        remainder = (remainder * 10 + int(ch)) % 97
-    check = 98 - remainder
-    return f"{prefix18}{check:02d}"
-
-
-_VALID_LEI = _valid_lei("529900HNOAA1KXQJUQ")
-
-
-@pytest.mark.ac("KG-AC-54")
-def test_shipped_lei_pattern_matches_valid_lei():
-    pack = load_pack("fibo_custom")
-    out = RulesEntitiesStrategy().extract(
-        [Chunk("c1", f"The counterparty's LEI is {_VALID_LEI}.")], ExtractionConfig(), pack)
-    assert any(c.surface_form == _VALID_LEI and c.entity_type == "Organization" for c in out)
 
 
 @pytest.mark.ac("KG-AC-54")

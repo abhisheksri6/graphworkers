@@ -44,7 +44,7 @@ PR 1-5 additions to this list:
 Knowledge-graph additions (spec v2, 2026-08-02) — three new **variant-`None`** capability types
 (`_PROFILE_VARIANT_FIELD[type] = None`), so all five derivations collapse onto the `capability_type`
 per the single-implementation invariant below (`entity_extraction` ≠ the older `extraction` capability):
-- `entity_extraction` — per-folder; layered rules/gazetteer › spaCy › LLM ensemble (ADR-0009)
+- `entity_extraction` — per-folder; layered regex › spaCy › LLM ensemble (ADR-0009 — the gazetteer tier is withdrawn at knowledge-graph spec v11)
 - `entity_canonicalization` — single-instance, placed downstream of the `hold` barrier; cross-run entity resolution
 - `kg_export` — single-instance, downstream of `hold`; Neo4j projection (ADR-0006)
 

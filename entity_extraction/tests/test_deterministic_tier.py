@@ -27,7 +27,6 @@ def _pack():
             EntityType("Person", None, ["PERSON"], "", None),
         ],
         relations=[PackRelation("employs", ["Organization"], ["Person"], "")],
-        gazetteer_link_types=[],
         regex_patterns=[RegexPattern(entity_type="Person", pattern=r"\bSatya\b")],
         dep_patterns=[DepPattern(relation_type="employs", pattern=_EMPLOYS_DEP_PATTERN,
                                   src_node="subject", dst_node="object")],

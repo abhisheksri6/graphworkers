@@ -1,6 +1,7 @@
 """KG-AC-18: the entity_extraction worker's installed dependency set is torch-free.
 
-ADR-0009: the inc-1 layered ensemble (rules/gazetteer + spaCy + LLM-API) carries no transformer,
+ADR-0009: the inc-1 layered ensemble (regex/EntityRuler + spaCy + LLM-API — the gazetteer tier
+withdrawn at spec v11) carries no transformer,
 so no torch. A fresh CPU venv installs clean with pydantic==2.9.2 held. Any FUTURE local transformer
 engine must load via raw `onnxruntime` — never `optimum`/`transformers` at runtime (`optimum
 [onnxruntime]` still pulls torch, spike F-ONNX-1). This test guards the installed env, so a stray
