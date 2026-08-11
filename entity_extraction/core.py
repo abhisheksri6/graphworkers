@@ -9,7 +9,10 @@ transforms the candidates strategies produce.
 from __future__ import annotations
 
 import hashlib
+import re
 from dataclasses import dataclass, field, replace
+from datetime import datetime
+from decimal import Decimal, InvalidOperation
 from typing import Dict, List, Optional, Tuple
 
 # Layer precedence (ADR-0009 / KG-AC-12; evolve v8 ADR-0012 §2 inserts 'regex'): higher wins on
@@ -58,6 +61,96 @@ class Relation:
                                           # at parse time if absent; None here only for hand-built
                                           # Relations in tests/other callers, never written that way)
     extractor: str = "llm"
+
+
+@dataclass
+class Fact:
+    """One attribute value proposed by the graph extractor for an already-known entity (evolve v13,
+    KG-AC-70). Only ``LlmGraphStrategy`` produces these — classify/entity_scoped are relation-only
+    modes over entities that already came from this same call (structural finding 2, cb-plan).
+    ``value`` is the model's verbatim string (consistent with the evidence-grounding guarantee — a
+    stored value that doesn't appear in the source would contradict it); ``normalized_value`` is
+    derived deterministically from the property's declared ``range`` kind, ``None`` when the
+    normaliser cannot parse it (never a guess). ``subject_type``/``subject_surface`` bind to the
+    entity that carries this fact — same resolve-by-id-then-stamp-from-Candidate shape KG-AC-71
+    already uses for relations, so the binding can't mismatch a subject's later filtered-out row
+    (a fact whose subject is itself dropped, e.g. unmapped or unlocatable, is dropped alongside it)."""
+    property: str
+    value: str
+    normalized_value: Optional[str]
+    evidence_text: str
+    subject_type: str
+    subject_surface: str
+    source_chunk_id: str
+    extractor: str = "llm"
+
+
+# KG-AC-64 (evolve v12) grounding helpers — relocated here from strategies/base.py at v13 (KG-AC-70)
+# so both relation AND fact validation share ONE implementation (reuse, not duplicate).
+_WS_RE = re.compile(r"\s+")
+
+
+def normalize_ws(s: Optional[str]) -> str:
+    return _WS_RE.sub(" ", s or "").strip()
+
+
+def evidence_grounded(evidence: Optional[str], chunk_text: str) -> bool:
+    """The evidence must occur VERBATIM (whitespace-normalised comparison; case-sensitive
+    otherwise) in the source chunk text. Missing evidence never grounds."""
+    if not evidence:
+        return False
+    return normalize_ws(evidence) in normalize_ws(chunk_text)
+
+
+# KG-AC-70 (v13): per-range-kind fact normalisation. Deliberately hand-rolled against a small,
+# explicit format set rather than a general-purpose date library (no new dependency decision folded
+# into this task) — an unparseable value is None, never a guess, and the caller counts it. Best-
+# effort by design: the AC itself accepts "unparseable -> null, counted," not universal coverage.
+_DATE_FORMATS = ("%Y-%m-%d", "%d %B %Y", "%B %d, %Y", "%d %b %Y", "%b %d, %Y")
+_CURRENCY_WORDS_RE = re.compile(r"\b(USD|EUR|GBP|JPY|CHF|CAD|AUD|dollars?|pounds?|euros?)\b", re.IGNORECASE)
+_NUMBER_STRIP_RE = re.compile(r"[,$€£¥\s]")
+
+
+def _normalize_date(value: str) -> Optional[str]:
+    v = normalize_ws(value)
+    for fmt in _DATE_FORMATS:
+        try:
+            return datetime.strptime(v, fmt).strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+    return None
+
+
+def _normalize_number(value: str) -> Optional[str]:
+    v = _CURRENCY_WORDS_RE.sub("", value)
+    v = _NUMBER_STRIP_RE.sub("", v)
+    if not v:
+        return None
+    try:
+        d = Decimal(v)
+    except InvalidOperation:
+        return None
+    return format(d, "f")
+
+
+_RANGE_NORMALIZERS = {
+    "date": _normalize_date,
+    "number": _normalize_number,
+    # identifier/string: whitespace-trimmed only (KG-AC-70's clarify answer) -- always succeeds on
+    # a non-empty value, so both kinds share the plain normalize_ws helper directly (no entry
+    # needed here; see normalize_fact_value's fallback branch).
+}
+
+
+def normalize_fact_value(value: str, range_kind: str) -> Optional[str]:
+    """KG-AC-70: deterministic per-``range``-kind normalisation. ``date``/``number`` may fail to
+    parse (returns None, caller counts it); ``identifier``/``string`` (and any other declared kind,
+    defensively) fall back to whitespace-trimming, which always succeeds on a non-empty value."""
+    normalizer = _RANGE_NORMALIZERS.get(range_kind)
+    if normalizer is not None:
+        return normalizer(value)
+    trimmed = normalize_ws(value)
+    return trimmed or None
 
 
 def _precedence(layer: str) -> int:
@@ -184,6 +277,37 @@ def build_entity_records(
             "stage": "staged",
         })
     return rows
+
+
+def attach_facts_to_entity_records(
+    entity_rows: List[Dict], facts: List[Fact],
+    chunk_provenance: Optional[Dict[str, Tuple[Optional[str], Optional[int]]]] = None,
+) -> List[Dict]:
+    """KG-AC-70 (v13): nest surviving facts onto their subject's kg_entities row — `attributes`
+    (the existing jsonb column) becomes a list of `{property, value, normalized_value, evidence,
+    source_doc_id, page}` objects, one row per entity, facts nested (no new table). Matched by the
+    same `(chunk, type, surface)` key `entity_uid_key_map` uses. A fact whose subject was itself
+    dropped (unmapped type, unlocatable span, ...) has no matching row and is silently excluded —
+    its subject never got written, so the fact has nowhere to attach; this is not a separate drop
+    reason and is not double-counted. Every row gets an `attributes` list, `[]` when it has no
+    facts (never omitted, never null) — mirrors `kg_canonical_entities.attributes`'s own
+    `DEFAULT '[]'::jsonb`. Mutates in place, returns the list (assign_occurrence_indices' pattern)."""
+    chunk_provenance = chunk_provenance or {}
+    by_subject_key: Dict[Tuple[str, str, str], List[Fact]] = {}
+    for f in facts:
+        key = (f.source_chunk_id, f.subject_type, f.subject_surface)
+        by_subject_key.setdefault(key, []).append(f)
+    for row in entity_rows:
+        key = (row.get("source_chunk_id"), row.get("entity_type"), row.get("surface_form"))
+        attrs = []
+        for f in by_subject_key.get(key, []):
+            doc_id, page = chunk_provenance.get(f.source_chunk_id, (None, None))
+            attrs.append({
+                "property": f.property, "value": f.value, "normalized_value": f.normalized_value,
+                "evidence": f.evidence_text, "source_doc_id": doc_id, "page": page,
+            })
+        row["attributes"] = attrs
+    return entity_rows
 
 
 def build_edge_records(
@@ -316,6 +440,7 @@ def build_summary(
     unmapped_type_count: int, promote_top_n: int = 10, ungrounded_relation_count: int = 0,
     self_consistency_votes: int = 1, chunk_metadata_missing_count: int = 0,
     unresolved_reference_count: int = 0, unlocatable_entity_count: int = 0,
+    unmapped_property_count: int = 0, ungrounded_fact_count: int = 0,
 ) -> Dict:
     """The KG-AC-9 state-plane scalar summary the callback promotes (no bulk rows on state).
     *Amended v11 — `linked_count` (gazetteer-link count) is dropped with that capability.*
@@ -330,7 +455,11 @@ def build_summary(
     run made (run 1 and every self-consistency repeat). `unlocatable_entity_count` (KG-AC-72)
     added: non-abstract entities the model returned whose surface could not be located in the
     source chunk, dropped rather than written with a null span — this is a NEW v13 behaviour, not
-    a preservation of an existing one (see this task's Done writeup for the correction).*"""
+    a preservation of an existing one (see this task's Done writeup for the correction).
+    `unmapped_property_count`/`ungrounded_fact_count` (KG-AC-70) added: facts dropped either for an
+    unknown property / invalid domain (the one vocabulary-mapping counter — KG-AC-70's row counts
+    both gates together, unlike relations' uncounted illegal-domain posture) or for ungrounded
+    evidence, respectively.*"""
     distinct_types = len({r["entity_type"] for r in entity_rows})
     return {
         "entity_count": len(entity_rows),
@@ -345,6 +474,8 @@ def build_summary(
         "chunk_metadata_missing_count": chunk_metadata_missing_count,
         "unresolved_reference_count": unresolved_reference_count,
         "unlocatable_entity_count": unlocatable_entity_count,
+        "unmapped_property_count": unmapped_property_count,
+        "ungrounded_fact_count": ungrounded_fact_count,
     }
 
 

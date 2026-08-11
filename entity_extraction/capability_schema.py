@@ -73,6 +73,10 @@ CAPABILITY_SCHEMA: Dict[str, Any] = {
                                        "description": "Relations whose src_id/dst_id did not resolve to an entity in the same LLM call's own response (KG-AC-71)"},
         "unlocatable_entity_count": {"type": "integer", "always_present": True,
                                      "description": "Non-abstract entities the model returned whose surface could not be located in the source chunk, dropped rather than written (KG-AC-72)"},
+        "unmapped_property_count": {"type": "integer", "always_present": True,
+                                    "description": "Facts dropped for an unknown property or a property whose subject type does not satisfy its declared domain (KG-AC-70)"},
+        "ungrounded_fact_count": {"type": "integer", "always_present": True,
+                                  "description": "Facts dropped because their evidence was not found verbatim in the source chunk (KG-AC-70)"},
     },
     "artifact_inputs": {
         "chunks": {"required": "always",

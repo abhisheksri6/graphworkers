@@ -22,15 +22,14 @@ pure filters below are unit-testable with fakes today.
 """
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from typing import Any, List, Optional, Tuple
 
 from candidate_pairs import enumerate_candidate_pairs
 from core import (
-    Candidate, Relation, assign_occurrence_indices, build_edge_records, build_entity_records,
-    build_summary, entity_uid_key_map, filter_bare_pronouns, merge_candidates, merge_edge_records,
-    vote_relations,
+    Candidate, Fact, Relation, assign_occurrence_indices, attach_facts_to_entity_records,
+    build_edge_records, build_entity_records, build_summary, entity_uid_key_map, evidence_grounded,
+    filter_bare_pronouns, merge_candidates, merge_edge_records, vote_relations,
 )
 
 
@@ -103,21 +102,6 @@ def filter_closed_vocab(candidates: List[Candidate], config: ExtractionConfig, p
     return kept, unmapped
 
 
-_WS_RE = re.compile(r"\s+")
-
-
-def _normalize_ws(s: Optional[str]) -> str:
-    return _WS_RE.sub(" ", s or "").strip()
-
-
-def _evidence_grounded(evidence: Optional[str], chunk_text: str) -> bool:
-    """KG-AC-64 (evolve v12): the evidence must occur VERBATIM (whitespace-normalised comparison;
-    case-sensitive otherwise) in the source chunk text. Missing evidence never grounds."""
-    if not evidence:
-        return False
-    return _normalize_ws(evidence) in _normalize_ws(chunk_text)
-
-
 def validate_relations(
     relations: List[Relation], pack, chunk_text_by_id: dict,
 ) -> Tuple[List[Relation], int]:
@@ -135,11 +119,44 @@ def validate_relations(
             continue
         if r.extractor != "rules":
             chunk_text = chunk_text_by_id.get(r.source_chunk_id, "")
-            if not _evidence_grounded(r.evidence_text, chunk_text):
+            if not evidence_grounded(r.evidence_text, chunk_text):
                 ungrounded += 1
                 continue
         kept.append(r)
     return kept, ungrounded
+
+
+def validate_facts(
+    facts: List[Fact], pack, chunk_text_by_id: dict,
+) -> Tuple[List[Fact], int, int]:
+    """KG-AC-70 (evolve v13): keep only facts whose `property` is in the pack's declared attribute
+    vocabulary AND whose subject's type satisfies that property's declared domain (a subtype of the
+    declared domain is accepted) AND whose evidence occurs verbatim in the source chunk (KG-AC-64's
+    grounding rule, reused via `core.evidence_grounded`, not duplicated).
+
+    Unlike `validate_relations`' illegal-domain-UNCOUNTED posture, KG-AC-70's own text says "a fact
+    failing EITHER gate is dropped and counted" — both an unknown property and an invalid domain
+    fold into `unmapped_property_count` (the one vocabulary-mapping counter KG-AC-74 names; there is
+    no separate "illegal domain" counter for facts the way relations have none at all). An
+    ungrounded evidence counts toward `ungrounded_fact_count`. Deterministic.
+    Returns (kept, unmapped_property_count, ungrounded_fact_count)."""
+    kept: List[Fact] = []
+    unmapped_property = 0
+    ungrounded = 0
+    for f in facts:
+        dp = pack.datatype_properties.get(f.property)
+        if dp is None:
+            unmapped_property += 1
+            continue
+        if f.subject_type != dp.domain and not pack.is_descendant(f.subject_type, dp.domain):
+            unmapped_property += 1
+            continue
+        chunk_text = chunk_text_by_id.get(f.source_chunk_id, "")
+        if not evidence_grounded(f.evidence_text, chunk_text):
+            ungrounded += 1
+            continue
+        kept.append(f)
+    return kept, unmapped_property, ungrounded
 
 
 # -- orchestration (impure — instantiates the injected strategies) ---------
@@ -148,6 +165,7 @@ def run_graph_extraction(chunks: List[Chunk], config: ExtractionConfig, pack, *,
                          llm_client=None,
                          unresolved_reference_sink: Optional[List[int]] = None,
                          unlocatable_entity_sink: Optional[List[int]] = None,
+                         facts_sink: Optional[List[List[Fact]]] = None,
                          ) -> Tuple[List[Candidate], List[Relation]]:
     """KG-AC-43/44: the active entity layer(s) + relations for this config. ``engine=spacy`` is
     entity-only (zero relations, KG-AC-44). ``engine=llm`` emits entities AND relations from ONE
@@ -186,6 +204,8 @@ def run_graph_extraction(chunks: List[Chunk], config: ExtractionConfig, pack, *,
         candidates += graph.extract(chunks, config, pack)
         if unlocatable_entity_sink is not None:  # KG-AC-72: entities from THIS call are always
             unlocatable_entity_sink.append(graph.unlocatable_entity_count)  # used, any relation_strategy
+        if facts_sink is not None:  # KG-AC-70: facts, like entities, ALWAYS come from this ONE call
+            facts_sink.append(graph.facts)  # regardless of relation_strategy — never re-collected
         if config.relation_strategy == "generate":  # KG-AC-59: generate XOR classify — under
             relations = graph.relations             # classify, this SAME call's relations are
             # discarded; entities from it are still used. Classify's own relations come from
@@ -253,12 +273,16 @@ def run_pipeline(chunks: List[Chunk], config: ExtractionConfig, pack, *, folder_
     # discarded, per the structural finding above), so counting a repeat run's unlocatable drops
     # would tally something that never affected the written graph.
     unlocatable_entity_counts: List[int] = []
+    # KG-AC-70 (v13): facts, like entities, come from run_graph_extraction's ONE primary call only
+    # — never re-collected from a self-consistency repeat (mirrors the entities-from-run-1 rule).
+    facts_lists: List[List[Fact]] = []
 
     candidates, raw_relations = run_graph_extraction(
         chunks, config, pack, spacy_model_path=spacy_model_path,
         spacy_nlp=shared_nlp, llm_client=llm_client,
         unresolved_reference_sink=unresolved_counts,
         unlocatable_entity_sink=unlocatable_entity_counts,
+        facts_sink=facts_lists,
     )
     if config.coreference_enabled:
         candidates = filter_bare_pronouns(candidates)
@@ -276,6 +300,16 @@ def run_pipeline(chunks: List[Chunk], config: ExtractionConfig, pack, *, folder_
     # KG-AC-64 (evolve v12): every LLM relation mode needs chunk text for evidence grounding, not
     # just classify's candidate-pair prompt — built once, unconditionally.
     chunk_text_by_id = {ch.chunk_id: ch.text for ch in chunks}
+
+    # KG-AC-70 (v13): domain-validate + evidence-ground the run's facts (run 1 only, see above),
+    # then nest survivors onto their subject's kg_entities row. A fact whose subject was itself
+    # dropped by filter_closed_vocab/guardrails (unmapped type, blocked, ...) has no matching row
+    # in `ent_rows` and is silently excluded by attach_facts_to_entity_records — the SAME
+    # dangling-endpoint posture build_edge_records already applies to relations (uncounted; the
+    # subject's own drop is what got counted, not a second reason).
+    raw_facts = facts_lists[0] if facts_lists else []
+    kept_facts, unmapped_property, ungrounded_fact = validate_facts(raw_facts, pack, chunk_text_by_id)
+    attach_facts_to_entity_records(ent_rows, kept_facts, chunk_provenance)
 
     # KG-AC-67 (evolve v12): self-consistency voting needs the deterministic rules-layer relations
     # (already run ONCE, inside run_graph_extraction) kept SEPARATE from the active LLM relation
@@ -362,6 +396,8 @@ def run_pipeline(chunks: List[Chunk], config: ExtractionConfig, pack, *, folder_
                             self_consistency_votes=self_consistency_votes,
                             chunk_metadata_missing_count=chunk_metadata_missing_count,
                             unresolved_reference_count=sum(unresolved_counts),
-                            unlocatable_entity_count=sum(unlocatable_entity_counts))
+                            unlocatable_entity_count=sum(unlocatable_entity_counts),
+                            unmapped_property_count=unmapped_property,
+                            ungrounded_fact_count=ungrounded_fact)
     usage = list(getattr(llm_client, "usage", []) or [])
     return ent_rows, edge_rows, summary, usage, guardrails_blocked

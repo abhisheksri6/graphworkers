@@ -20,12 +20,14 @@ from typing import Any, Dict, List, Optional
 # a doc_id or page, so provenance recorded null rather than a fabricated value. `unresolved_
 # reference_count` (KG-AC-71) added: relations whose src_id/dst_id did not resolve to an entity in
 # the same LLM call's own response. `unlocatable_entity_count` (KG-AC-72) added: non-abstract
-# entities dropped for having no locatable span.*
+# entities dropped for having no locatable span. `unmapped_property_count`/`ungrounded_fact_count`
+# (KG-AC-70) added: facts dropped for an unknown property/invalid domain, or for ungrounded
+# evidence, respectively.*
 _STATE_SCALARS = (
     "entity_count", "edge_count", "distinct_types", "top_entities",
     "ontology_pack", "ontology_version", "unmapped_type_count", "ungrounded_relation_count",
     "self_consistency_votes", "chunk_metadata_missing_count", "unresolved_reference_count",
-    "unlocatable_entity_count",
+    "unlocatable_entity_count", "unmapped_property_count", "ungrounded_fact_count",
 )
 
 

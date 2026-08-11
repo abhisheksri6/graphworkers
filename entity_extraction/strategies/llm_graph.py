@@ -40,7 +40,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
-from core import Candidate, Relation
+from core import Candidate, Fact, Relation, normalize_fact_value
 
 from .base import Chunk, EntityStrategy, ExtractionConfig
 from clients import LlmOutputError  # re-exported — existing callers import this from llm_graph
@@ -66,6 +66,23 @@ def build_graph_system_prompt(pack) -> str:
         for r in pack.relations.values()
     ]
     relation_vocab = "\n".join(relation_lines) or "(this pack declares no relation types)"
+    # KG-AC-70 (v13): only mention facts when the pack declares an attribute vocabulary at all —
+    # a pack with none loads (and prompts) exactly as before v13 (KG-AC-69's compatibility promise).
+    fact_lines = [
+        f"- {p.property} (subject: {p.domain}): {p.guidance}".rstrip(": ")
+        for p in pack.datatype_properties.values()
+    ]
+    facts_block = ""
+    if fact_lines:
+        facts_block = (
+            "\n\nUse ONLY these attribute properties, each attached to its listed subject type "
+            "(drop anything that does not fit):\n" + "\n".join(fact_lines) +
+            "\n\nFacts: reference the subject entity by POSITION (subject_id), same as relations. "
+            "\"value\" MUST be the exact text as written in the document — never paraphrase, "
+            "convert units, or reformat it. Every fact MUST include the exact source sentence it "
+            "was stated in as \"evidence\" — omit a fact entirely if you cannot quote a supporting "
+            "sentence."
+        )
     return (
         "You extract named entities AND relations from enterprise documents by calling the "
         f"'{_TOOL_NAME}' tool.\n\n"
@@ -84,6 +101,7 @@ def build_graph_system_prompt(pack) -> str:
         "the relation.\n\n"
         "Every relation MUST include the exact source sentence it was stated in as \"evidence\" — "
         "omit a relation entirely if you cannot quote a supporting sentence."
+        f"{facts_block}"
     )
 
 
@@ -103,6 +121,7 @@ def build_graph_tool_schema(pack) -> Dict[str, Any]:
     (enum-constrained type fields), on top of the existing downstream filters."""
     entity_types = sorted(pack.entity_types.keys())
     relation_types = sorted(pack.relations.keys())
+    property_names = sorted(pack.datatype_properties.keys())
     entity_item = {
         "type": "object",
         "properties": {
@@ -123,13 +142,30 @@ def build_graph_tool_schema(pack) -> Dict[str, Any]:
         },
         "required": ["type", "src_id", "dst_id", "evidence"],
     }
+    properties: Dict[str, Any] = {
+        "entities": {"type": "array", "items": entity_item},
+        "relations": {"type": "array", "items": relation_item},
+    }
+    required = ["entities", "relations"]
+    # KG-AC-70 (v13): the schema asks for facts ONLY when the pack declares an attribute vocabulary
+    # — a pack with none (KG-AC-69's optional-key promise) never sees a facts field at all.
+    if property_names:
+        fact_item = {
+            "type": "object",
+            "properties": {
+                "subject_id": {"type": "integer", "description": "0-based position of the subject entity in this response's entities array"},
+                "property": {"type": "string", "enum": property_names},
+                "value": {"type": "string"},
+                "evidence": {"type": "string"},
+            },
+            "required": ["subject_id", "property", "value", "evidence"],
+        }
+        properties["facts"] = {"type": "array", "items": fact_item}
+        required.append("facts")
     return {
         "type": "object",
-        "properties": {
-            "entities": {"type": "array", "items": entity_item},
-            "relations": {"type": "array", "items": relation_item},
-        },
-        "required": ["entities", "relations"],
+        "properties": properties,
+        "required": required,
     }
 
 
@@ -155,7 +191,9 @@ class LlmGraphStrategy(EntityStrategy):
     def __init__(self, llm_client: Any = None):
         self._client = llm_client
         self.relations: List[Relation] = []
-        self.unresolved_reference_count = 0  # KG-AC-71 (v13) — src_id/dst_id absent from entities[]
+        self.facts: List[Fact] = []  # KG-AC-70 (v13) — read immediately after extract(), same
+                                      # synchronous-scope contract as self.relations
+        self.unresolved_reference_count = 0  # KG-AC-71 (v13) — src_id/dst_id/subject_id absent from entities[]
         self.unlocatable_entity_count = 0  # KG-AC-72 (v13) — non-abstract entity, span not found
 
     def extract(self, chunks: List[Chunk], config: ExtractionConfig, pack) -> List[Candidate]:
@@ -163,6 +201,7 @@ class LlmGraphStrategy(EntityStrategy):
             raise LlmConnectionError("llm engine requires an LLM connection (connection_id)")
         entities: List[Candidate] = []
         relations: List[Relation] = []
+        facts: List[Fact] = []
         system_text = build_graph_system_prompt(pack)
         tool_schema = build_graph_tool_schema(pack)
         for ch in chunks:
@@ -228,5 +267,37 @@ class LlmGraphStrategy(EntityStrategy):
                         dst_surface=dst_cand.surface_form, dst_type=dst_cand.entity_type,
                         evidence_text=evidence, extractor="llm",
                     ))
+            facts_raw = data.get("facts")
+            if isinstance(facts_raw, list):  # KG-AC-70: missing/malformed -> entities+relations only, no crash
+                # KG-AC-70 intra-call duplicates: two facts in this SAME call sharing (subject_id,
+                # property) with an identical normalized_value collapse to one; differing values are
+                # both kept (resolved cross-mention by KG-AC-78's conflict rule, a P11/canonicalization
+                # concern — not this loop's job). Scope is "one call" = one chunk's response, matching
+                # by_raw_index's own per-chunk scope above.
+                seen_facts: set = set()
+                for item in facts_raw:
+                    prop = item.get("property")
+                    value = item.get("value")
+                    evidence = item.get("evidence")
+                    if not prop or not value or not evidence:  # mandatory fields, mirrors relations
+                        continue
+                    subject_id = item.get("subject_id")
+                    subject_cand = by_raw_index.get(subject_id)
+                    if subject_cand is None:  # KG-AC-71: id not in this response's own entities[]
+                        self.unresolved_reference_count += 1
+                        continue
+                    dp = pack.datatype_properties.get(prop)
+                    normalized = normalize_fact_value(value, dp.range) if dp is not None else None
+                    dedup_key = (subject_id, prop, normalized)
+                    if dedup_key in seen_facts:
+                        continue
+                    seen_facts.add(dedup_key)
+                    facts.append(Fact(
+                        property=prop, value=value, normalized_value=normalized,
+                        evidence_text=evidence, subject_type=subject_cand.entity_type,
+                        subject_surface=subject_cand.surface_form, source_chunk_id=ch.chunk_id,
+                        extractor="llm",
+                    ))
         self.relations = relations
+        self.facts = facts
         return entities
