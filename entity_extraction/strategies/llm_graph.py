@@ -62,6 +62,10 @@ def build_graph_system_prompt(pack) -> str:
         f"{entity_vocab}\n\n"
         "Use ONLY these relation types, respecting domain/range (drop anything that does not fit):\n"
         f"{relation_vocab}\n\n"
+        "Entities: emit ONE entity item PER OCCURRENCE — every time a name is mentioned in the "
+        "text, not just once per distinct name. If \"Acme Corp\" is mentioned three times, return "
+        "three separate entity items for it, not one. Do not deduplicate repeated mentions into a "
+        "single item.\n\n"
         "Every relation MUST include the exact source sentence it was stated in as \"evidence\" — "
         "omit a relation entirely if you cannot quote a supporting sentence."
     )
