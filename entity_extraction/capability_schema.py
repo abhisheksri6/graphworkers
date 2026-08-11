@@ -77,6 +77,8 @@ CAPABILITY_SCHEMA: Dict[str, Any] = {
                                     "description": "Facts dropped for an unknown property or a property whose subject type does not satisfy its declared domain (KG-AC-70)"},
         "ungrounded_fact_count": {"type": "integer", "always_present": True,
                                   "description": "Facts dropped because their evidence was not found verbatim in the source chunk (KG-AC-70)"},
+        "guardrails_blocked_facts": {"type": "integer", "always_present": True,
+                                    "description": "Facts dropped by the same once-per-batch guardrails screen entity candidates already pass through (KG-AC-84)"},
     },
     "artifact_inputs": {
         "chunks": {"required": "always",

@@ -221,12 +221,22 @@ def run_graph_extraction(chunks: List[Chunk], config: ExtractionConfig, pack, *,
     return candidates, relations
 
 
-def _screen_guardrails(candidates: List[Candidate], screen) -> Tuple[List[Candidate], int]:
-    """KG-AC-17: guardrails invoked ONCE per batch; a blocking verdict drops the blocked candidates
-    and counts them — the task still succeeds. ``screen(candidates) -> list[bool]`` (True = keep)."""
-    keep_flags = screen(candidates)
-    kept = [c for c, keep in zip(candidates, keep_flags) if keep]
-    return kept, len(candidates) - len(kept)
+def _screen_guardrails(
+    candidates: List[Candidate], facts: List[Fact], screen,
+) -> Tuple[List[Candidate], List[Fact], int, int]:
+    """KG-AC-17/84: guardrails invoked ONCE per batch — entity candidates AND facts are screened
+    together in the SAME call (KG-AC-84: never a second guardrails_check call for facts). A blocking
+    verdict drops the blocked item(s) and counts them; the task still succeeds. ``screen(items) ->
+    list[bool]`` where ``items`` is ``candidates + facts`` concatenated, in that order (True = keep).
+    Returns (kept_candidates, kept_facts, blocked_candidate_count, blocked_fact_count)."""
+    items = candidates + facts
+    keep_flags = screen(items)
+    n = len(candidates)
+    cand_flags, fact_flags = keep_flags[:n], keep_flags[n:]
+    kept_candidates = [c for c, keep in zip(candidates, cand_flags) if keep]
+    kept_facts = [f for f, keep in zip(facts, fact_flags) if keep]
+    return (kept_candidates, kept_facts,
+            len(candidates) - len(kept_candidates), len(facts) - len(kept_facts))
 
 
 def run_pipeline(chunks: List[Chunk], config: ExtractionConfig, pack, *, folder_id: str,
@@ -289,9 +299,17 @@ def run_pipeline(chunks: List[Chunk], config: ExtractionConfig, pack, *, folder_
     # the LLM model id is known only after the client resolves its connection (on first call)
     model_id = getattr(llm_client, "resolved_model", None) if llm_client is not None else None
     kept, unmapped = filter_closed_vocab(candidates, config, pack)
+    # KG-AC-70 (v13): facts, like entities, come from run_graph_extraction's ONE primary call only
+    # (see the accumulator comment above) — read here, before guardrails, so the SAME once-per-batch
+    # screening call below can cover both (KG-AC-84).
+    raw_facts = facts_lists[0] if facts_lists else []
     guardrails_blocked = 0
+    guardrails_blocked_facts = 0
     if guardrails_screen is not None:
-        kept, guardrails_blocked = _screen_guardrails(kept, guardrails_screen)
+        # KG-AC-84: candidates AND facts screened together in ONE call — never a second
+        # guardrails_check call for facts (KG-AC-17's once-per-batch posture, extended).
+        kept, raw_facts, guardrails_blocked, guardrails_blocked_facts = _screen_guardrails(
+            kept, raw_facts, guardrails_screen)
     assign_occurrence_indices(kept)
     merged = merge_candidates(kept)
     ent_rows = build_entity_records(folder_id, merged, config.ontology_pack, pack.version,
@@ -301,13 +319,12 @@ def run_pipeline(chunks: List[Chunk], config: ExtractionConfig, pack, *, folder_
     # just classify's candidate-pair prompt — built once, unconditionally.
     chunk_text_by_id = {ch.chunk_id: ch.text for ch in chunks}
 
-    # KG-AC-70 (v13): domain-validate + evidence-ground the run's facts (run 1 only, see above),
-    # then nest survivors onto their subject's kg_entities row. A fact whose subject was itself
-    # dropped by filter_closed_vocab/guardrails (unmapped type, blocked, ...) has no matching row
-    # in `ent_rows` and is silently excluded by attach_facts_to_entity_records — the SAME
+    # KG-AC-70 (v13): domain-validate + evidence-ground the run's (already guardrails-screened)
+    # facts, then nest survivors onto their subject's kg_entities row. A fact whose subject was
+    # itself dropped by filter_closed_vocab/guardrails (unmapped type, blocked, ...) has no matching
+    # row in `ent_rows` and is silently excluded by attach_facts_to_entity_records — the SAME
     # dangling-endpoint posture build_edge_records already applies to relations (uncounted; the
     # subject's own drop is what got counted, not a second reason).
-    raw_facts = facts_lists[0] if facts_lists else []
     kept_facts, unmapped_property, ungrounded_fact = validate_facts(raw_facts, pack, chunk_text_by_id)
     attach_facts_to_entity_records(ent_rows, kept_facts, chunk_provenance)
 
@@ -398,6 +415,7 @@ def run_pipeline(chunks: List[Chunk], config: ExtractionConfig, pack, *, folder_
                             unresolved_reference_count=sum(unresolved_counts),
                             unlocatable_entity_count=sum(unlocatable_entity_counts),
                             unmapped_property_count=unmapped_property,
-                            ungrounded_fact_count=ungrounded_fact)
+                            ungrounded_fact_count=ungrounded_fact,
+                            guardrails_blocked_facts=guardrails_blocked_facts)
     usage = list(getattr(llm_client, "usage", []) or [])
     return ent_rows, edge_rows, summary, usage, guardrails_blocked

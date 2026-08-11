@@ -20,6 +20,7 @@
   "unlocatable_entity_count": 0,
   "unmapped_property_count": 0,
   "ungrounded_fact_count": 0,
+  "guardrails_blocked_facts": 0,
   "usage": [
     {"charge_category": "llm", "model": "amazon.nova-pro-v1:0", "input_tokens": 100, "output_tokens": 50, "connection_id": "conn-1"}
   ],
@@ -41,7 +42,8 @@
       "unresolved_reference_count": 0,
       "unlocatable_entity_count": 0,
       "unmapped_property_count": 0,
-      "ungrounded_fact_count": 0
+      "ungrounded_fact_count": 0,
+      "guardrails_blocked_facts": 0
     }
   ]
 }

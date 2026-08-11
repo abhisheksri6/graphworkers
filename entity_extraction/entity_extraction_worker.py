@@ -91,14 +91,22 @@ def _entity_extraction_boot_preflight(**_) -> None:
     preflight_spacy_model(settings)
 
 
+def _screen_text(item) -> str:
+    """The model-produced string guardrails must screen — `Candidate` carries `.surface_form`,
+    `Fact` carries `.value` (KG-AC-84: facts are screened the same way entity candidates are, via
+    this same function, in the SAME once-per-batch call)."""
+    return item.surface_form if hasattr(item, "surface_form") else item.value
+
+
 def _guardrails_screen(config: ExtractionConfig, run_id, folder_id) -> Optional[Callable]:
-    """A once-per-batch guardrails screen (KG-AC-17) built from the sidecar, or None when unset."""
+    """A once-per-batch guardrails screen (KG-AC-17/84) built from the sidecar, or None when unset.
+    ``items`` is entity candidates AND facts concatenated (base._screen_guardrails's contract)."""
     policy = config.__dict__.get("guardrail_policy") if hasattr(config, "__dict__") else None
     if not settings.guardrails_url:
         return None
 
-    def screen(candidates: List) -> List[bool]:
-        texts = [c.surface_form for c in candidates]
+    def screen(items: List) -> List[bool]:
+        texts = [_screen_text(item) for item in items]
         verdicts = guardrails_client.guardrails_check(
             texts=texts, policy=policy, direction="output",
             enforcement_point="entity_extraction", run_id=run_id, folder_id=folder_id,
@@ -106,9 +114,9 @@ def _guardrails_screen(config: ExtractionConfig, run_id, folder_id) -> Optional[
         )
         # guardrails_check returns per-text allow/deny; keep True = allowed. Fail-open on shape drift.
         allowed = getattr(verdicts, "allowed", None)
-        if isinstance(allowed, list) and len(allowed) == len(candidates):
+        if isinstance(allowed, list) and len(allowed) == len(items):
             return list(allowed)
-        return [True] * len(candidates)
+        return [True] * len(items)
 
     return screen
 

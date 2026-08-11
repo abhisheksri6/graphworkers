@@ -441,6 +441,7 @@ def build_summary(
     self_consistency_votes: int = 1, chunk_metadata_missing_count: int = 0,
     unresolved_reference_count: int = 0, unlocatable_entity_count: int = 0,
     unmapped_property_count: int = 0, ungrounded_fact_count: int = 0,
+    guardrails_blocked_facts: int = 0,
 ) -> Dict:
     """The KG-AC-9 state-plane scalar summary the callback promotes (no bulk rows on state).
     *Amended v11 — `linked_count` (gazetteer-link count) is dropped with that capability.*
@@ -459,7 +460,10 @@ def build_summary(
     `unmapped_property_count`/`ungrounded_fact_count` (KG-AC-70) added: facts dropped either for an
     unknown property / invalid domain (the one vocabulary-mapping counter — KG-AC-70's row counts
     both gates together, unlike relations' uncounted illegal-domain posture) or for ungrounded
-    evidence, respectively.*"""
+    evidence, respectively. `guardrails_blocked_facts` (KG-AC-84) added: facts dropped by the SAME
+    once-per-batch guardrails screen entity candidates already pass through — mirrors the entity
+    posture, but unlike the pre-existing entity `guardrails_blocked` count (a bare `run_pipeline`
+    return value, never on the state plane), this one IS wired to the state plane from this task.*"""
     distinct_types = len({r["entity_type"] for r in entity_rows})
     return {
         "entity_count": len(entity_rows),
@@ -476,6 +480,7 @@ def build_summary(
         "unlocatable_entity_count": unlocatable_entity_count,
         "unmapped_property_count": unmapped_property_count,
         "ungrounded_fact_count": ungrounded_fact_count,
+        "guardrails_blocked_facts": guardrails_blocked_facts,
     }
 
 

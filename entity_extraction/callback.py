@@ -22,12 +22,14 @@ from typing import Any, Dict, List, Optional
 # the same LLM call's own response. `unlocatable_entity_count` (KG-AC-72) added: non-abstract
 # entities dropped for having no locatable span. `unmapped_property_count`/`ungrounded_fact_count`
 # (KG-AC-70) added: facts dropped for an unknown property/invalid domain, or for ungrounded
-# evidence, respectively.*
+# evidence, respectively. `guardrails_blocked_facts` (KG-AC-84) added: facts dropped by the same
+# once-per-batch guardrails screen entity candidates already pass through.*
 _STATE_SCALARS = (
     "entity_count", "edge_count", "distinct_types", "top_entities",
     "ontology_pack", "ontology_version", "unmapped_type_count", "ungrounded_relation_count",
     "self_consistency_votes", "chunk_metadata_missing_count", "unresolved_reference_count",
     "unlocatable_entity_count", "unmapped_property_count", "ungrounded_fact_count",
+    "guardrails_blocked_facts",
 )
 
 
