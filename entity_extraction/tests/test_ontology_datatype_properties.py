@@ -76,13 +76,27 @@ def test_entity_type_abstract_declared_true_survives_loading():
     assert p.entity_types["Deal"].abstract is True
 
 
-# ---- investment_fibo v2.0 integration (already declares all three) -------
+# ---- investment_fibo v2.1 integration (already declares all three) -------
 @pytest.mark.ac("KG-AC-69")
 def test_investment_fibo_datatype_properties_and_abstract_types_visible():
     p = load_pack("investment_fibo")
-    assert len(p.datatype_properties) == 15
+    # v2.1 (2026-08-11, same-day extended OWL): 42 datatype properties, up from v2.0's 15 -- fills
+    # the CommercialTerms/FeeSchedule/Amendment/SideLetter/InvestmentManager gap the v2.0 pack's own
+    # _known_gaps note flagged as missing.
+    assert len(p.datatype_properties) == 42
     assert p.datatype_properties["commitmentAmount"].domain == "Commitment"
     assert p.datatype_properties["commitmentAmount"].range == "number"
     abstract_types = {t for t, et in p.entity_types.items() if et.abstract}
     assert abstract_types == {"InvestmentRelationship", "Commitment", "CommercialTerms"}
-    assert "lei" not in p.datatype_properties
+    # lei: v2.0 deliberately excluded it (owner decision, v13 clarify pass); v2.1 re-added it the
+    # SAME day when the extended OWL arrived (owner decision, declaration only -- downstream
+    # consumption, e.g. as a canonicalization match key, is a separate, not-yet-made decision).
+    assert "lei" in p.datatype_properties
+    assert p.datatype_properties["lei"].domain == "LegalEntity"
+    assert p.datatype_properties["lei"].range == "identifier"
+    # spot-check one property from each newly-filled domain (the v2.0 _known_gaps)
+    assert p.datatype_properties["investmentManagerName"].domain == "InvestmentManager"
+    assert p.datatype_properties["managementFee"].domain == "CommercialTerms"
+    assert p.datatype_properties["feeScheduleId"].domain == "FeeSchedule"
+    assert p.datatype_properties["amendmentId"].domain == "Amendment"
+    assert p.datatype_properties["sideLetterId"].domain == "SideLetter"
