@@ -15,6 +15,7 @@ import pytest
 from clients import supports_prompt_caching
 
 
+@pytest.mark.ac("KG-AC-66")
 @pytest.mark.parametrize("model", [
     "anthropic.claude-sonnet-4-20250514-v1:0",
     "us.anthropic.claude-3-5-haiku-20241022-v1:0",
@@ -25,6 +26,7 @@ def test_caching_families_are_recognised(model):
     assert supports_prompt_caching(model) is True
 
 
+@pytest.mark.ac("KG-AC-66")
 @pytest.mark.parametrize("model", [
     "openai.gpt-oss-120b-1:0",   # the model that exposed the bug
     "meta.llama3-70b-instruct-v1:0",
@@ -38,6 +40,7 @@ def test_unknown_or_non_caching_models_omit_the_cache_block(model):
     assert supports_prompt_caching(model) is False
 
 
+@pytest.mark.ac("KG-AC-66")
 def test_system_blocks_built_per_capability():
     from clients import build_system_blocks
 
