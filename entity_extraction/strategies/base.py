@@ -30,6 +30,7 @@ from candidate_pairs import enumerate_candidate_pairs
 from core import (
     Candidate, Relation, assign_occurrence_indices, build_edge_records, build_entity_records,
     build_summary, entity_uid_key_map, filter_bare_pronouns, merge_candidates, merge_edge_records,
+    vote_relations,
 )
 
 
@@ -50,7 +51,9 @@ class ExtractionConfig:
     coreference_enabled: bool = False      # KG-AC-48 — document-scoped anaphora resolution, opt-in
     rules_entities_enabled: bool = False   # KG-AC-54 — opt-in EntityRuler regex/phrase entity layer
     rules_relations_enabled: bool = False  # KG-AC-55 — opt-in DependencyMatcher relation layer
-    relation_strategy: str = "generate"    # KG-AC-59 — generate | classify, decoupled from engine
+    relation_strategy: str = "generate"    # KG-AC-59/65 — generate | classify | entity_scoped
+    relation_self_consistency_k: int = 1   # KG-AC-67 — self-consistency voting; 1=off (default),
+                                            # bounded to [1,5] at point of use (run_pipeline)
 
     @classmethod
     def from_dict(cls, d: dict) -> "ExtractionConfig":
@@ -66,6 +69,7 @@ class ExtractionConfig:
             rules_entities_enabled=bool(d.get("rules_entities_enabled", False)),
             rules_relations_enabled=bool(d.get("rules_relations_enabled", False)),
             relation_strategy=d.get("relation_strategy", "generate"),
+            relation_self_consistency_k=int(d.get("relation_self_consistency_k", 1)),
         )
 
 
@@ -238,6 +242,15 @@ def run_pipeline(chunks: List[Chunk], config: ExtractionConfig, pack, *, folder_
     # just classify's candidate-pair prompt — built once, unconditionally.
     chunk_text_by_id = {ch.chunk_id: ch.text for ch in chunks}
 
+    # KG-AC-67 (evolve v12): self-consistency voting needs the deterministic rules-layer relations
+    # (already run ONCE, inside run_graph_extraction) kept SEPARATE from the active LLM relation
+    # mode's own output — rules relations are exempt from voting and must never be multiplied by k.
+    # `raw_relations` at this point mixes both when engine=llm+generate (run_graph_extraction
+    # appended rules relations to whatever generate produced); split them apart.
+    rules_relations = [r for r in raw_relations if r.extractor == "rules"]
+    llm_relations_run1 = [r for r in raw_relations if r.extractor != "rules"]
+
+    pairs = None  # computed once under classify; reused by repeat runs if k>1
     if config.relation_strategy == "classify":
         # KG-AC-60/61: candidate pairs are enumerated over the FINAL merged (post span-overlap-
         # resolution) entity set, never the raw pre-merge candidates — otherwise overlapping
@@ -251,20 +264,52 @@ def run_pipeline(chunks: List[Chunk], config: ExtractionConfig, pack, *, folder_
         sentence_spans = {ch.chunk_id: [(s.start_char, s.end_char) for s in shared_nlp(ch.text).sents]
                           for ch in chunks}
         pairs = enumerate_candidate_pairs(merged, sentence_spans, pack)
-        raw_relations = raw_relations + LlmClassifyStrategy(llm_client=llm_client).classify(pairs, chunk_text_by_id)
+        llm_relations_run1 = LlmClassifyStrategy(llm_client=llm_client).classify(pairs, chunk_text_by_id)
     elif config.relation_strategy == "entity_scoped":
         # KG-AC-65 (evolve v12): one call per chunk over the FINAL merged entity set — no
         # candidate-pair enumeration, no sentence-boundary nlp needed at all (unlike classify).
         # Lazy RELATIVE import, same safety reasoning as llm_classify's import above.
         from .llm_entity_scoped import LlmEntityScopedStrategy
-        raw_relations = raw_relations + LlmEntityScopedStrategy(llm_client=llm_client).extract(
+        llm_relations_run1 = LlmEntityScopedStrategy(llm_client=llm_client).extract(
             merged, chunk_text_by_id, pack)
+    # else "generate": llm_relations_run1 is already set, from run_graph_extraction's own call.
 
+    # KG-AC-67 (evolve v12): self-consistency voting. k<=1 is an EXACT no-op — byte-identical
+    # output, ONE call total, the path every existing profile uses. k>1 repeats ONLY the active LLM
+    # relation mode's own call, NEVER the entity/rules-producing run_graph_extraction call — so
+    # entities always come from run 1 alone (a structural finding from cb-plan: under `generate`,
+    # entities and relations come from the SAME call, so a repeat run necessarily re-extracts
+    # entities too, but those are discarded here — only `.relations` is read).
+    k = max(1, min(config.relation_self_consistency_k, 5))
+    if k <= 1:
+        llm_relations = llm_relations_run1
+        self_consistency_votes = 1
+    else:
+        def _one_more_llm_relation_run() -> List[Relation]:
+            if config.relation_strategy == "classify":
+                from .llm_classify import LlmClassifyStrategy
+                return LlmClassifyStrategy(llm_client=llm_client).classify(pairs, chunk_text_by_id)
+            if config.relation_strategy == "entity_scoped":
+                from .llm_entity_scoped import LlmEntityScopedStrategy
+                return LlmEntityScopedStrategy(llm_client=llm_client).extract(merged, chunk_text_by_id, pack)
+            # "generate": re-invoke LlmGraphStrategy fresh; its entities are discarded here, only
+            # .relations is read (relative import, same safety posture as the imports above).
+            from .llm_graph import LlmGraphStrategy
+            graph = LlmGraphStrategy(llm_client=llm_client)
+            graph.extract(chunks, config, pack)
+            return graph.relations
+
+        runs = [llm_relations_run1] + [_one_more_llm_relation_run() for _ in range(k - 1)]
+        llm_relations = vote_relations(runs, k)
+        self_consistency_votes = k
+
+    raw_relations = rules_relations + llm_relations
     relations, ungrounded = validate_relations(raw_relations, pack, chunk_text_by_id)
     edge_rows = build_edge_records(folder_id, relations, entity_uid_key_map(ent_rows))
     edge_rows = merge_edge_records(edge_rows)  # KG-AC-56 (evolve v8) — union+dedup multi-source relations
 
     summary = build_summary(ent_rows, edge_rows, config.ontology_pack, pack.version,
-                            unmapped, config.promote_top_n, ungrounded_relation_count=ungrounded)
+                            unmapped, config.promote_top_n, ungrounded_relation_count=ungrounded,
+                            self_consistency_votes=self_consistency_votes)
     usage = list(getattr(llm_client, "usage", []) or [])
     return ent_rows, edge_rows, summary, usage, guardrails_blocked

@@ -48,6 +48,7 @@ def test_state_scalar_outputs_present():
     for field in (
         "entity_count", "edge_count", "distinct_types",
         "ontology_pack", "ontology_version", "unmapped_type_count", "ungrounded_relation_count",
+        "self_consistency_votes",
     ):
         assert out[field]["always_present"] is True, field
     # top_entities is bounded top-N and may be empty -> not always_present
@@ -105,6 +106,21 @@ def test_relation_strategy_field_present_optional_enum():
     assert field["required"] == "optional"
     assert "generate" in field["description"].lower()
     assert "classify" in field["description"].lower()
+
+
+# ---- N3/N4 (spec v12): entity_scoped mode + self-consistency voting — KG-AC-65/67/68 -------
+@pytest.mark.ac("KG-AC-65")
+def test_relation_strategy_description_names_entity_scoped():
+    field = CAPABILITY_SCHEMA["input_fields"]["entity_extraction_config.relation_strategy"]
+    assert "entity_scoped" in field["description"].lower()
+
+
+@pytest.mark.ac("KG-AC-67")
+def test_relation_self_consistency_k_field_present_optional_bounded():
+    field = CAPABILITY_SCHEMA["input_fields"]["entity_extraction_config.relation_self_consistency_k"]
+    assert field["type"] == "integer"
+    assert field["required"] == "optional"
+    assert "1" in field["description"] and "5" in field["description"]
 
 
 @pytest.mark.ac("KG-AC-57")

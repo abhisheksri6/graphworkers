@@ -9,7 +9,7 @@ transforms the candidates strategies produce.
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Dict, List, Optional, Tuple
 
 # Layer precedence (ADR-0009 / KG-AC-12; evolve v8 ADR-0012 §2 inserts 'regex'): higher wins on
@@ -246,6 +246,36 @@ def merge_edge_records(edge_rows: List[Dict]) -> List[Dict]:
     return out
 
 
+def vote_relations(runs: List[List[Relation]], k: int) -> List[Relation]:
+    """KG-AC-67 (evolve v12 — self-consistency voting): given ``k`` independent relation-extraction
+    runs over the SAME input, keep only relations that appeared in **>= ceil(k/2)** of the runs;
+    each surviving relation's ``confidence`` is overwritten with its vote fraction (``votes / k``).
+    Identity for voting is ``(relation_type, src_surface, src_type, dst_surface, dst_type,
+    source_chunk_id)`` — NOT ``evidence_text`` (different runs may quote different supporting
+    sentences for the same claim). A run asserting the same triple twice counts as ONE vote, never
+    two. The kept row's other fields (``evidence_text``, ``extractor``, ...) come from its FIRST
+    occurrence across runs, in run order. Deterministic given fixed run order. ``k`` is accepted
+    explicitly rather than derived from ``len(runs)`` so the threshold is correct even when a run
+    legitimately returns zero relations."""
+    threshold = -(-k // 2)  # ceil(k/2), no math import needed
+    votes: Dict[Tuple[str, str, str, str, str, str], int] = {}
+    first_seen: Dict[Tuple[str, str, str, str, str, str], Relation] = {}
+    for run in runs:
+        seen_this_run = set()
+        for r in run:
+            key = (r.relation_type, r.src_surface, r.src_type, r.dst_surface, r.dst_type, r.source_chunk_id)
+            if key in seen_this_run:
+                continue  # a run asserting the same triple twice is ONE vote, not two
+            seen_this_run.add(key)
+            votes[key] = votes.get(key, 0) + 1
+            first_seen.setdefault(key, r)
+    kept: List[Relation] = []
+    for key, count in votes.items():
+        if count >= threshold:
+            kept.append(replace(first_seen[key], confidence=count / k))
+    return kept
+
+
 def promote_top_entities(entity_rows: List[Dict], promote_top_n: int = 10, hard_max: int = 20) -> List[Dict]:
     """KG-AC-37: deterministic doc-level top_entities — ranked by mention count (descending),
     ties broken by first-appearance order — never exceeding ``promote_top_n`` (clamped to
@@ -268,11 +298,14 @@ def promote_top_entities(entity_rows: List[Dict], promote_top_n: int = 10, hard_
 def build_summary(
     entity_rows: List[Dict], edge_rows: List[Dict], ontology_pack: str, ontology_version: str,
     unmapped_type_count: int, promote_top_n: int = 10, ungrounded_relation_count: int = 0,
+    self_consistency_votes: int = 1,
 ) -> Dict:
     """The KG-AC-9 state-plane scalar summary the callback promotes (no bulk rows on state).
     *Amended v11 — `linked_count` (gazetteer-link count) is dropped with that capability.*
     *Amended v12 — `ungrounded_relation_count` (KG-AC-64) added: LLM relations dropped because
-    their evidence was not found verbatim in the source chunk.*"""
+    their evidence was not found verbatim in the source chunk. `self_consistency_votes` (KG-AC-67)
+    added: the number of independent LLM relation-extraction runs made for the batch (1 when
+    self-consistency voting is off, the default).*"""
     distinct_types = len({r["entity_type"] for r in entity_rows})
     return {
         "entity_count": len(entity_rows),
@@ -283,6 +316,7 @@ def build_summary(
         "ontology_version": ontology_version,
         "unmapped_type_count": unmapped_type_count,
         "ungrounded_relation_count": ungrounded_relation_count,
+        "self_consistency_votes": self_consistency_votes,
     }
 
 

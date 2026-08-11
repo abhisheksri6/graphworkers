@@ -45,7 +45,9 @@ CAPABILITY_SCHEMA: Dict[str, Any] = {
         "entity_extraction_config.rules_relations_enabled": {"type": "boolean", "required": "optional",
                                                              "description": "Opt-in deterministic DependencyMatcher relation layer, merged alongside engine (default false, KG-AC-55)"},
         "entity_extraction_config.relation_strategy": {"type": "string", "required": "optional",
-                                                        "description": "Relation-extraction mode: generate (default, LLM open triple-generation) | classify (candidate-pair closed-set classification) — decoupled from engine (KG-AC-59)"},
+                                                        "description": "Relation-extraction mode: generate (default, LLM open triple-generation) | classify (candidate-pair closed-set classification) | entity_scoped (one call per chunk over the merged entity list, no candidate-pair/same-sentence gate — KG-AC-65) — decoupled from engine (KG-AC-59)"},
+        "entity_extraction_config.relation_self_consistency_k": {"type": "integer", "required": "optional",
+                                                                  "description": "Self-consistency voting: run the active LLM relation mode k times and keep majority-vote relations (default 1 = off, bounded 1-5, KG-AC-67)"},
     },
     "output_fields": {
         "folder_id": {"type": "string", "always_present": True},
@@ -63,6 +65,8 @@ CAPABILITY_SCHEMA: Dict[str, Any] = {
                                 "description": "LLM types dropped as out-of-vocab"},
         "ungrounded_relation_count": {"type": "integer", "always_present": True,
                                      "description": "LLM relations dropped because their evidence was not found verbatim in the source chunk (KG-AC-64)"},
+        "self_consistency_votes": {"type": "integer", "always_present": True,
+                                   "description": "Number of independent LLM relation-extraction runs made for the batch (1 when self-consistency voting is off, KG-AC-67)"},
     },
     "artifact_inputs": {
         "chunks": {"required": "always",
