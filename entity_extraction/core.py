@@ -149,20 +149,27 @@ def compute_edge_uid(folder_id: str, relation_type: str, src_entity_uid: str, ds
 def build_entity_records(
     folder_id: str, merged: List[Candidate], ontology_pack: str, ontology_version: str,
     model_id: Optional[str] = None,
+    chunk_provenance: Optional[Dict[str, Tuple[Optional[str], Optional[int]]]] = None,
 ) -> List[Dict]:
     """Turn merged candidates into staged kg_entities row dicts (extraction-owned fields).
     normalized_form / canonical_id are left for canonicalization. run_id/dag_id are added by the
-    worker at store time."""
+    worker at store time. KG-AC-73 (v13): `chunk_provenance` (chunk_id -> (doc_id, page)) stamps
+    each row's `source_doc_id`/`page`; a chunk absent from the map (or the map itself omitted)
+    records both as null — never a fabricated value."""
+    chunk_provenance = chunk_provenance or {}
     rows: List[Dict] = []
     for c in merged:
         uid = compute_entity_uid(
             folder_id, c.source_chunk_id, c.entity_type, c.surface_form, c.span_start, c.occurrence_idx
         )
+        doc_id, page = chunk_provenance.get(c.source_chunk_id, (None, None))
         rows.append({
             "entity_uid": uid,
             "entity_type": c.entity_type,
             "surface_form": c.surface_form,
             "source_chunk_id": c.source_chunk_id,
+            "source_doc_id": doc_id,
+            "page": page,
             "span_start": c.span_start,
             "span_end": c.span_end,
             "occurrence_idx": c.occurrence_idx,
@@ -178,10 +185,13 @@ def build_entity_records(
 
 def build_edge_records(
     folder_id: str, relations: List[Relation], entity_uid_by_key: Dict[Tuple[str, str, str], str],
+    chunk_provenance: Optional[Dict[str, Tuple[Optional[str], Optional[int]]]] = None,
 ) -> List[Dict]:
     """Turn relations into kg_edges row dicts. An edge whose endpoints are not both in the merged
     entity set (keyed by (chunk, type, surface)) is dropped — an edge can only connect written
-    entities. Deterministic."""
+    entities. Deterministic. KG-AC-73 (v13): `chunk_provenance` stamps each edge's `source_doc_id`/
+    `page` from its own evidence chunk, same lookup + null-on-absence rule as build_entity_records."""
+    chunk_provenance = chunk_provenance or {}
     rows: List[Dict] = []
     for r in relations:
         src_key = (r.source_chunk_id, r.src_type, r.src_surface)
@@ -190,11 +200,14 @@ def build_edge_records(
         dst_uid = entity_uid_by_key.get(dst_key)
         if not src_uid or not dst_uid:
             continue
+        doc_id, page = chunk_provenance.get(r.source_chunk_id, (None, None))
         rows.append({
             "edge_uid": compute_edge_uid(folder_id, r.relation_type, src_uid, dst_uid),
             "relation_type": r.relation_type,
             "src_entity_uid": src_uid,
             "dst_entity_uid": dst_uid,
+            "source_doc_id": doc_id,
+            "page": page,
             "confidence": r.confidence,
             "evidence_text": r.evidence_text,
             "extractor": r.extractor,
@@ -298,14 +311,17 @@ def promote_top_entities(entity_rows: List[Dict], promote_top_n: int = 10, hard_
 def build_summary(
     entity_rows: List[Dict], edge_rows: List[Dict], ontology_pack: str, ontology_version: str,
     unmapped_type_count: int, promote_top_n: int = 10, ungrounded_relation_count: int = 0,
-    self_consistency_votes: int = 1,
+    self_consistency_votes: int = 1, chunk_metadata_missing_count: int = 0,
 ) -> Dict:
     """The KG-AC-9 state-plane scalar summary the callback promotes (no bulk rows on state).
     *Amended v11 — `linked_count` (gazetteer-link count) is dropped with that capability.*
     *Amended v12 — `ungrounded_relation_count` (KG-AC-64) added: LLM relations dropped because
     their evidence was not found verbatim in the source chunk. `self_consistency_votes` (KG-AC-67)
     added: the number of independent LLM relation-extraction runs made for the batch (1 when
-    self-consistency voting is off, the default).*"""
+    self-consistency voting is off, the default).*
+    *Amended v13 — `chunk_metadata_missing_count` (KG-AC-73) added: chunks whose `chunk_metadata`
+    lacked a doc_id or page, so document/page provenance recorded null rather than a fabricated
+    value.*"""
     distinct_types = len({r["entity_type"] for r in entity_rows})
     return {
         "entity_count": len(entity_rows),
@@ -317,6 +333,7 @@ def build_summary(
         "unmapped_type_count": unmapped_type_count,
         "ungrounded_relation_count": ungrounded_relation_count,
         "self_consistency_votes": self_consistency_votes,
+        "chunk_metadata_missing_count": chunk_metadata_missing_count,
     }
 
 

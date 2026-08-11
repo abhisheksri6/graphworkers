@@ -45,6 +45,7 @@ def resolve_coreferences(chunks: List[Chunk], llm_client: Any) -> List[Chunk]:
     prior_text = ""
     for ch in chunks:
         rewritten = llm_client.complete(build_coref_prompt(ch.text, prior_text))
-        resolved.append(Chunk(chunk_id=ch.chunk_id, text=(rewritten or "").strip() or ch.text))
+        resolved.append(Chunk(chunk_id=ch.chunk_id, text=(rewritten or "").strip() or ch.text,
+                              doc_id=ch.doc_id, page=ch.page))
         prior_text = f"{prior_text}\n{ch.text}" if prior_text else ch.text
     return resolved

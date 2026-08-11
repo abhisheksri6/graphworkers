@@ -67,6 +67,8 @@ CAPABILITY_SCHEMA: Dict[str, Any] = {
                                      "description": "LLM relations dropped because their evidence was not found verbatim in the source chunk (KG-AC-64)"},
         "self_consistency_votes": {"type": "integer", "always_present": True,
                                    "description": "Number of independent LLM relation-extraction runs made for the batch (1 when self-consistency voting is off, KG-AC-67)"},
+        "chunk_metadata_missing_count": {"type": "integer", "always_present": True,
+                                         "description": "Chunks whose chunk_metadata lacked a doc_id or page, so document/page provenance recorded null rather than a fabricated value (KG-AC-73)"},
     },
     "artifact_inputs": {
         "chunks": {"required": "always",

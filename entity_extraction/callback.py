@@ -16,10 +16,12 @@ from typing import Any, Dict, List, Optional
 # The KG-AC-9 scalar state summary promoted per folder (order-stable for the shared fixture).
 # *Amended v11 — `linked_count` is dropped with the gazetteer capability.*
 # *Amended v12 — `ungrounded_relation_count` (KG-AC-64) and `self_consistency_votes` (KG-AC-67) added.*
+# *Amended v13 — `chunk_metadata_missing_count` (KG-AC-73) added: chunks whose chunk_metadata lacked
+# a doc_id or page, so provenance recorded null rather than a fabricated value.*
 _STATE_SCALARS = (
     "entity_count", "edge_count", "distinct_types", "top_entities",
     "ontology_pack", "ontology_version", "unmapped_type_count", "ungrounded_relation_count",
-    "self_consistency_votes",
+    "self_consistency_votes", "chunk_metadata_missing_count",
 )
 
 

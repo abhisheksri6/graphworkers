@@ -19,9 +19,19 @@ from strategies.base import Chunk
 
 def read_chunks(storage, folder_id: str) -> List[Chunk]:
     """Load the folder's text_chunks via the shared StorageClient (KG-AC-7). Empty list means the
-    folder has no chunks — the worker turns that into a loud failure (never an empty graph)."""
+    folder has no chunks — the worker turns that into a loud failure (never an empty graph).
+    KG-AC-73 (v13): `chunk_metadata` (already written by chunking, `{"page": N, "source":
+    {"filename": ...}}`) is no longer discarded — `doc_id`/`page` are read from it, defaulting to
+    None (never a fabricated value) when either is absent."""
     rows = storage.read_chunks(folder_id)
-    return [Chunk(chunk_id=r["chunk_id"], text=(r.get("content") or "")) for r in rows]
+    chunks = []
+    for r in rows:
+        meta = r.get("chunk_metadata") or {}
+        doc_id = (meta.get("source") or {}).get("filename")
+        page = meta.get("page")
+        chunks.append(Chunk(chunk_id=r["chunk_id"], text=(r.get("content") or ""),
+                            doc_id=doc_id, page=page))
+    return chunks
 
 
 def partition_replace(db, folder_id: str, run_id: Any, dag_id: Any, source_task_id: Any,
@@ -41,6 +51,7 @@ def partition_replace(db, folder_id: str, run_id: Any, dag_id: Any, source_task_
                 (
                     folder_id, run_id, dag_id, source_task_id,
                     e["entity_uid"], e["entity_type"], e["surface_form"], e.get("source_chunk_id"),
+                    e.get("source_doc_id"), e.get("page"),
                     e.get("span_start"), e.get("span_end"), e.get("occurrence_idx", 0),
                     e.get("confidence", 1.0),
                     e.get("extractor"), e.get("ontology_pack"), e.get("ontology_version"),
@@ -51,12 +62,13 @@ def partition_replace(db, folder_id: str, run_id: Any, dag_id: Any, source_task_
             returned = execute_values(cur, """
                 INSERT INTO public.kg_entities
                   (folder_id, run_id, dag_id, source_task_id, entity_uid, entity_type, surface_form,
-                   source_chunk_id, span_start, span_end, occurrence_idx, confidence,
+                   source_chunk_id, source_doc_id, page, span_start, span_end, occurrence_idx, confidence,
                    extractor, ontology_pack, ontology_version, model_id, stage)
                 VALUES %s
                 ON CONFLICT (entity_uid) DO UPDATE SET
                   entity_type=EXCLUDED.entity_type, surface_form=EXCLUDED.surface_form,
                   run_id=EXCLUDED.run_id, dag_id=EXCLUDED.dag_id, source_task_id=EXCLUDED.source_task_id,
+                  source_doc_id=EXCLUDED.source_doc_id, page=EXCLUDED.page,
                   confidence=EXCLUDED.confidence, extractor=EXCLUDED.extractor,
                   ontology_pack=EXCLUDED.ontology_pack, ontology_version=EXCLUDED.ontology_version,
                   model_id=EXCLUDED.model_id, stage=EXCLUDED.stage
@@ -76,7 +88,7 @@ def partition_replace(db, folder_id: str, run_id: Any, dag_id: Any, source_task_
                     e["edge_uid"], e["relation_type"],
                     uid_to_id[e["src_entity_uid"]], uid_to_id[e["dst_entity_uid"]],
                     e["src_entity_uid"], e["dst_entity_uid"], e.get("confidence", 1.0),
-                    e.get("evidence_text"),
+                    e.get("evidence_text"), e.get("source_doc_id"), e.get("page"),
                 )
                 for e in valid_edges
             ]
@@ -84,13 +96,14 @@ def partition_replace(db, folder_id: str, run_id: Any, dag_id: Any, source_task_
                 INSERT INTO public.kg_edges
                   (folder_id, run_id, dag_id, source_task_id, edge_uid, relation_type,
                    src_entity_id, dst_entity_id, src_entity_uid, dst_entity_uid, confidence,
-                   evidence_text)
+                   evidence_text, source_doc_id, page)
                 VALUES %s
                 ON CONFLICT (edge_uid) DO UPDATE SET
                   relation_type=EXCLUDED.relation_type, src_entity_id=EXCLUDED.src_entity_id,
                   dst_entity_id=EXCLUDED.dst_entity_id, run_id=EXCLUDED.run_id,
                   dag_id=EXCLUDED.dag_id, confidence=EXCLUDED.confidence,
-                  evidence_text=EXCLUDED.evidence_text
+                  evidence_text=EXCLUDED.evidence_text, source_doc_id=EXCLUDED.source_doc_id,
+                  page=EXCLUDED.page
             """, edge_values, page_size=500)
             edge_count = len(valid_edges)
 

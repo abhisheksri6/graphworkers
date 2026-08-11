@@ -38,6 +38,8 @@ from core import (
 class Chunk:
     chunk_id: str
     text: str
+    doc_id: Optional[str] = None  # KG-AC-73 (v13) — from chunk_metadata.source.filename
+    page: Optional[int] = None    # KG-AC-73 (v13) — from chunk_metadata.page
 
 
 @dataclass
@@ -207,6 +209,11 @@ def run_pipeline(chunks: List[Chunk], config: ExtractionConfig, pack, *, folder_
     any bare-pronoun entity that survives anyway is filtered deterministically. This single call site
     means BOTH the production task and the runtime-preview path (which both call run_pipeline) get
     identical coreference behavior — never a divergent code path."""
+    # KG-AC-73 (v13): computed from the ORIGINAL chunks (before any coref rewrite) — reflects the
+    # true completeness of the source data's chunk_metadata, independent of coreference resolution.
+    chunk_metadata_missing_count = sum(1 for ch in chunks if ch.doc_id is None or ch.page is None)
+    chunk_provenance = {ch.chunk_id: (ch.doc_id, ch.page) for ch in chunks}
+
     if config.coreference_enabled and config.engine == "llm":
         from .coref import resolve_coreferences
         chunks = resolve_coreferences(chunks, llm_client)
@@ -236,7 +243,8 @@ def run_pipeline(chunks: List[Chunk], config: ExtractionConfig, pack, *, folder_
         kept, guardrails_blocked = _screen_guardrails(kept, guardrails_screen)
     assign_occurrence_indices(kept)
     merged = merge_candidates(kept)
-    ent_rows = build_entity_records(folder_id, merged, config.ontology_pack, pack.version, model_id=model_id)
+    ent_rows = build_entity_records(folder_id, merged, config.ontology_pack, pack.version,
+                                    model_id=model_id, chunk_provenance=chunk_provenance)
 
     # KG-AC-64 (evolve v12): every LLM relation mode needs chunk text for evidence grounding, not
     # just classify's candidate-pair prompt — built once, unconditionally.
@@ -305,11 +313,13 @@ def run_pipeline(chunks: List[Chunk], config: ExtractionConfig, pack, *, folder_
 
     raw_relations = rules_relations + llm_relations
     relations, ungrounded = validate_relations(raw_relations, pack, chunk_text_by_id)
-    edge_rows = build_edge_records(folder_id, relations, entity_uid_key_map(ent_rows))
+    edge_rows = build_edge_records(folder_id, relations, entity_uid_key_map(ent_rows),
+                                   chunk_provenance=chunk_provenance)
     edge_rows = merge_edge_records(edge_rows)  # KG-AC-56 (evolve v8) — union+dedup multi-source relations
 
     summary = build_summary(ent_rows, edge_rows, config.ontology_pack, pack.version,
                             unmapped, config.promote_top_n, ungrounded_relation_count=ungrounded,
-                            self_consistency_votes=self_consistency_votes)
+                            self_consistency_votes=self_consistency_votes,
+                            chunk_metadata_missing_count=chunk_metadata_missing_count)
     usage = list(getattr(llm_client, "usage", []) or [])
     return ent_rows, edge_rows, summary, usage, guardrails_blocked
