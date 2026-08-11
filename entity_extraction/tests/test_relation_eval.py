@@ -25,6 +25,7 @@ from core import assign_occurrence_indices, merge_candidates
 from ontologies import load_pack
 from strategies import Chunk, ExtractionConfig, filter_closed_vocab, run_graph_extraction
 from strategies.llm_classify import LlmClassifyStrategy
+from strategies.llm_entity_scoped import LlmEntityScopedStrategy
 from strategies.llm_graph import LlmOutputError, build_graph_system_prompt, build_graph_tool_schema, build_graph_user_prompt
 from strategies.spacy_ner import load_spacy_model
 from candidate_pairs import enumerate_candidate_pairs
@@ -407,3 +408,130 @@ def test_classify_relation_edge_set_variance_side_by_side_with_generate():
     print(f"\nKG LLM RELATION CLASSIFY-MODE EDGE-SET VARIANCE (report-only, KG-AC-P8): "
           f"{json.dumps(scores, indent=2)}")
     # report-only per KG-AC-P8 ("variance reported", no threshold set) -- no assertion on the value
+
+
+# ---------------------------------------------------------------------------
+# N8 (spec v12, KG-AC-P9/P10): entity_scoped vs classify/generate, and k=3 vs k=1 stability.
+# Gated identically to KG-AC-P8's classify tests above (requirements.md's own "same gate as
+# KG-AC-P9" wording, KG-AC-P10) -- entity_scoped itself needs no sentence-boundary nlp (KG-AC-65's
+# whole point is no same-sentence gate), but the frozen AC text ties both new v12 evals to the same
+# combined live-LLM + by-copy-spaCy gate as KG-AC-P8 for environment-gating symmetry across every
+# v12 relation-mode eval in this file -- honored as written, not loosened based on this file's own
+# read of what entity_scoped structurally requires.
+# ---------------------------------------------------------------------------
+def _run_llm_entity_scoped_relations_over_chunks(chunks_gold, pack, client):
+    """entity_scoped mode end-to-end, at the SAME Relation-level granularity as
+    `_run_llm_classify_relations_over_chunks`/`_run_llm_graph_relations_over_chunks` above
+    (pre-build_edge_records). Mirrors `strategies.base.run_pipeline`'s entity_scoped branch: one
+    call per chunk over the FINAL merged entity set, no candidate-pair enumeration, no sentence
+    boundaries needed."""
+    chunks = [Chunk(c["chunk_id"], c["text"]) for c in chunks_gold]
+    cfg = ExtractionConfig(engine="llm", ontology_pack=pack.name, relation_strategy="entity_scoped")
+    candidates, _raw_relations = run_graph_extraction(chunks, cfg, pack, llm_client=client)
+    kept, _unmapped = filter_closed_vocab(candidates, cfg, pack)
+    assign_occurrence_indices(kept)
+    merged = merge_candidates(kept)
+
+    chunk_text_by_id = {ch.chunk_id: ch.text for ch in chunks}
+    relations = LlmEntityScopedStrategy(llm_client=client).extract(merged, chunk_text_by_id, pack)
+
+    predicted = [{"chunk_id": r.source_chunk_id, "relation_type": r.relation_type,
+                 "src_type": r.src_type, "src_surface": r.src_surface,
+                 "dst_type": r.dst_type, "dst_surface": r.dst_surface} for r in relations]
+    return predicted, relations
+
+
+@_SKIP_NO_LLM_OR_SPACY
+@pytest.mark.ac("KG-AC-P9")
+def test_entity_scoped_relation_micro_f1_vs_classify_and_generate_baseline():
+    from clients import build_llm_client
+
+    chunks_gold = _load_chunks()
+    relations_gold = _load_relations()
+    fibo = load_pack("fibo_core")
+    client = build_llm_client(_LLM_CONNECTION)
+
+    predicted, _raw = _run_llm_entity_scoped_relations_over_chunks(chunks_gold, fibo, client)
+    scores = relation_micro_f1(predicted, relations_gold)
+    print(f"\nKG LLM ENTITY_SCOPED RELATION MICRO-F1: {json.dumps(scores, indent=2)}")
+
+    base = _baseline()  # kg_relation_llm_fibo_core -- the COMMITTED generate-mode baseline
+    classify_base = None
+    if BASELINES.exists():
+        classify_base = json.loads(BASELINES.read_text(encoding="utf-8")).get("kg_relation_classify_fibo_core")
+
+    # KG-AC-P9: entity_scoped exists to raise recall over BOTH other modes -- failing to beat
+    # either means the mode does not justify its added per-chunk-call cost. No committed baseline
+    # for either sibling mode yet (neither has run for real in any environment) -- floor only, the
+    # same 0.55 floor P7/P8 themselves use until real numbers exist to compare against.
+    assert scores["f1"] >= 0.55, scores
+    if base is not None:
+        assert scores["f1"] >= base["f1"], f"entity_scoped below generate baseline: {scores} vs {base}"
+    if classify_base is not None:
+        assert scores["f1"] >= classify_base["f1"], (
+            f"entity_scoped below classify baseline: {scores} vs {classify_base}")
+
+
+@_SKIP_NO_LLM_OR_SPACY
+@pytest.mark.ac("KG-AC-P9")
+def test_entity_scoped_relation_edge_set_variance_side_by_side():
+    # "variance reported" alongside generate/classify's own (test_llm_relation_generate_mode_edge_
+    # set_variance / test_classify_relation_edge_set_variance_side_by_side_with_generate above).
+    # Report-only, same as those two.
+    from clients import build_llm_client
+
+    chunks_gold = _load_chunks()
+    fibo = load_pack("fibo_core")
+    client = build_llm_client(_LLM_CONNECTION)
+
+    runs = []
+    for _ in range(3):
+        _predicted, raw_relations = _run_llm_entity_scoped_relations_over_chunks(chunks_gold, fibo, client)
+        runs.append([{"chunk_id": r.source_chunk_id, "relation_type": r.relation_type,
+                     "src_type": r.src_type, "src_surface": r.src_surface,
+                     "dst_type": r.dst_type, "dst_surface": r.dst_surface} for r in raw_relations])
+
+    scores = relation_edge_set_variance(runs)
+    print(f"\nKG LLM RELATION ENTITY_SCOPED-MODE EDGE-SET VARIANCE (report-only): "
+          f"{json.dumps(scores, indent=2)}")
+
+
+@_SKIP_NO_LLM_OR_SPACY
+@pytest.mark.ac("KG-AC-P10")
+def test_self_consistency_k3_instability_below_k1():
+    # KG-AC-P10: run-to-run relation edge-set instability at relation_self_consistency_k=3 versus
+    # the same config at k=1, on entity_scoped mode (v12's own new mode -- the most natural surface
+    # to prove voting actually helps, since it is the mode this workstream added the voting FOR).
+    # k=1 is a single run (no voting -- the existing 3-independent-runs variance measurement above,
+    # `test_entity_scoped_relation_edge_set_variance_side_by_side`, IS the k=1 baseline: 3 raw,
+    # unvoted extraction runs over the same chunks). k=3 instability is measured the same way but
+    # over 3 INDEPENDENT ***voted*** outputs (each itself the majority vote of its own 3 sub-runs)
+    # -- voting should make each voted output closer to the others than raw single runs are.
+    from clients import build_llm_client
+    from core import vote_relations
+
+    chunks_gold = _load_chunks()
+    fibo = load_pack("fibo_core")
+    client = build_llm_client(_LLM_CONNECTION)
+
+    def _one_voted_run(k: int):
+        sub_runs = [_run_llm_entity_scoped_relations_over_chunks(chunks_gold, fibo, client)[1]
+                   for _ in range(k)]
+        return vote_relations(sub_runs, k)
+
+    k1_runs = [[{"chunk_id": r.source_chunk_id, "relation_type": r.relation_type,
+                "src_type": r.src_type, "src_surface": r.src_surface,
+                "dst_type": r.dst_type, "dst_surface": r.dst_surface}
+               for r in _one_voted_run(1)] for _ in range(3)]
+    k3_runs = [[{"chunk_id": r.source_chunk_id, "relation_type": r.relation_type,
+                "src_type": r.src_type, "src_surface": r.src_surface,
+                "dst_type": r.dst_type, "dst_surface": r.dst_surface}
+               for r in _one_voted_run(3)] for _ in range(3)]
+
+    k1_scores = relation_edge_set_variance(k1_runs)
+    k3_scores = relation_edge_set_variance(k3_runs)
+    print(f"\nKG SELF-CONSISTENCY INSTABILITY k=1: {json.dumps(k1_scores, indent=2)}")
+    print(f"KG SELF-CONSISTENCY INSTABILITY k=3: {json.dumps(k3_scores, indent=2)}")
+
+    assert k3_scores["instability"] < k1_scores["instability"], (
+        f"k=3 voting did not reduce instability: k=3 {k3_scores} vs k=1 {k1_scores}")
