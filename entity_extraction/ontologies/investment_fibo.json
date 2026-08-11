@@ -1,120 +1,98 @@
 {
   "name": "investment_fibo",
-  "version": "1.1",
-  "description": "Investment relationship ontology — investor/manager relationships, subscription agreements, fund commitments, and commercial terms. Updated to support direct concrete entity-to-entity relations and companion value entities for attributes.",
-  "_source_ontology": "owner-supplied OWL/Turtle, :InvestmentRelationshipOntology (@prefix : <http://example.org/investment#>)",
+  "version": "2.0",
+  "description": "Institutional Investment Relationship Ontology — translated 1:1 from the owner-supplied OWL (https://contextbuilder.ai/ontology/investment#, :InvestmentRelationshipOntology, 2026-08-11): all 12 owl:Class declarations become entity types and all 11 owl:ObjectProperty declarations become relations, with rdfs:domain/rdfs:range preserved exactly. v2.0 is a BREAKING rewrite of v1.1: the companion value types (MonetaryAmount/Date/Percentage/Identifier) and their carrier relations (hasValueAmount/hasFeeRate/effectiveOnDate/hasIdentifier) are REMOVED — they existed only because attribute values were previously unrepresentable, and are superseded by the datatype_properties declaration below (ADR-0008 amendment, spec v13). See _v13_dependency and _deviations_from_source_owl for what is inert until v13 ships and where this pack deliberately differs from the source OWL.",
+  "_source_ontology": "owner-supplied OWL/RDF, :InvestmentRelationshipOntology (@prefix iiro: <https://contextbuilder.ai/ontology/investment#>), received 2026-08-11",
+  "_v13_dependency": "The `datatype_properties` array and the per-type `abstract` flag are declared here but are INERT until knowledge-graph spec v13 ships (KG-AC-69/70/72). Today's loader reads only entity_types/relations/regex_patterns/dep_patterns, so under v12 this pack yields 12 entity types + 11 relations and NO facts. The abstract types below will also fail to locate a span under v12 and be dropped — that is expected, and is precisely the gap v13 closes. Nothing here breaks the current loader (unknown keys are ignored).",
+  "_deviations_from_source_owl": "TWO deliberate differences, both owner-approved: (1) `lei` is NOT declared. The source OWL declares iiro:lei on LegalEntity, but the owner directed at the v13 clarify pass (2026-08-11) that no LEI be carried — consistent in spirit with spec v11's removal of the gazetteer/external-identifier plane, even though the mechanism differs (v11 removed LOOKUP against an external index; this would have been TRANSCRIPTION of a value printed in the document). 15 of the source's 16 owl:DatatypeProperty declarations are translated. (2) The source OWL types every datatype property as xsd:string, INCLUDING dates and monetary amounts. Translating that faithfully would make `normalized_value` (KG-AC-70) a no-op and leave KG-AC-P11 unable to compare dates or amounts across documents, so the `range` kinds below are assigned SEMANTICALLY (date/number/identifier where the property clearly is one) rather than copying xsd:string uniformly. If the owner prefers literal fidelity to the OWL, set every range to `string` and accept that no normalisation occurs.",
+  "_known_gaps": "The source OWL declares NO datatype properties for CommercialTerms, FeeSchedule, Amendment or SideLetter, and no `name` for InvestmentManager — so management/performance fees, billing frequency, settlement currency, amendment identifiers and their previous/new values, and side-letter provisions are NOT extractable under this pack even after v13. The owner's own extraction guide (§9) expects roughly 40 fields where the OWL declares 16. This is a SOURCE-ONTOLOGY gap, not a pack translation error — filling it requires the owner to extend the OWL. Also: no owl:subClassOf appears in the source, so every type below has `parent: null` and no subtype reasoning is available (domain/range checks are exact-match only).",
   "entity_types": [
     {
       "type": "InvestmentRelationship",
       "parent": null,
+      "abstract": true,
       "spacy_labels": [],
-      "guidance": "The overall investing relationship between an investor and an investment manager — the top-level record that ties together the parties, their governing agreement, and their subscriptions.",
-      "iri": "http://example.org/investment#InvestmentRelationship"
+      "guidance": "The overall institutional investment relationship between an investor and an investment manager — the central aggregate tying together the parties, the governing agreement and the subscriptions. ABSTRACT: a document never writes this as a literal phrase; name it after the parties it connects (e.g. \"<Investor> - <Manager> Investment Relationship\").",
+      "iri": "https://contextbuilder.ai/ontology/investment#InvestmentRelationship"
     },
     {
       "type": "Investor",
       "parent": null,
       "spacy_labels": [],
-      "guidance": "A party that commits capital — an institution, fund-of-funds, pension scheme, family office, or individual subscribing to a fund.",
-      "iri": "http://example.org/investment#Investor"
+      "guidance": "An institutional investor committing capital — a pension scheme, insurer, fund-of-funds, family office or similar named party. Conceptually aligned to FIBO Party. Often introduced with a defined term such as (\"Investor\"), (\"Client\") or (\"Subscriber\").",
+      "iri": "https://contextbuilder.ai/ontology/investment#Investor"
     },
     {
       "type": "InvestmentManager",
       "parent": null,
       "spacy_labels": [],
-      "guidance": "The firm that manages the fund and its investment programme (general partner, asset manager, adviser).",
-      "iri": "http://example.org/investment#InvestmentManager"
+      "guidance": "The investment management organisation appointed to manage assets — usually introduced with a defined term such as (\"Investment Manager\") or (\"Manager\").",
+      "iri": "https://contextbuilder.ai/ontology/investment#InvestmentManager"
     },
     {
       "type": "Agreement",
       "parent": null,
       "spacy_labels": [],
-      "guidance": "The contract governing the investment relationship — limited partnership agreement, investment management agreement, subscription agreement, or similar named document.",
-      "iri": "http://example.org/investment#Agreement"
+      "guidance": "The investment management agreement itself — the named contract document, usually carrying a reference number (e.g. IMA-2025-018) and a title such as INVESTMENT MANAGEMENT AGREEMENT.",
+      "iri": "https://contextbuilder.ai/ontology/investment#Agreement"
     },
     {
       "type": "Subscription",
       "parent": null,
       "spacy_labels": [],
-      "guidance": "A specific act of subscribing into a fund under the relationship — the instrument recording that an investor bought in.",
-      "iri": "http://example.org/investment#Subscription"
+      "guidance": "A fund subscription — the investor's commitment document for a specific fund, usually carrying its own reference (e.g. SUB-2025-041).",
+      "iri": "https://contextbuilder.ai/ontology/investment#Subscription"
     },
     {
       "type": "Fund",
       "parent": null,
       "spacy_labels": [],
-      "guidance": "The named investment vehicle being invested into (a fund, sub-fund, feeder, or share class named as such).",
-      "iri": "http://example.org/investment#Fund"
+      "guidance": "The named investment fund being subscribed into (a fund, sub-fund, feeder or named share class).",
+      "iri": "https://contextbuilder.ai/ontology/investment#Fund"
     },
     {
       "type": "Commitment",
       "parent": null,
+      "abstract": true,
       "spacy_labels": [],
-      "guidance": "The committed capital undertaking attached to a subscription or investor obligation.",
-      "iri": "http://example.org/investment#Commitment"
-    },
-    {
-      "type": "CommercialTerms",
-      "parent": null,
-      "spacy_labels": [],
-      "guidance": "The commercial terms of an agreement — the negotiated economics clause covering fees, hurdles, carry, and discounts.",
-      "iri": "http://example.org/investment#CommercialTerms"
-    },
-    {
-      "type": "FeeSchedule",
-      "parent": null,
-      "spacy_labels": [],
-      "guidance": "A named fee schedule, fee table, or fee appendix that defines how fees are calculated.",
-      "iri": "http://example.org/investment#FeeSchedule"
-    },
-    {
-      "type": "Amendment",
-      "parent": null,
-      "spacy_labels": [],
-      "guidance": "A document amending an existing agreement — amendment, restatement, addendum, or variation deed.",
-      "iri": "http://example.org/investment#Amendment"
-    },
-    {
-      "type": "SideLetter",
-      "parent": null,
-      "spacy_labels": [],
-      "guidance": "A side letter supplementing an agreement with investor-specific terms (MFN, fee rebates, reporting, or capacity rights).",
-      "iri": "http://example.org/investment#SideLetter"
+      "guidance": "The capital commitment attached to a subscription — the undertaking itself, not the numeric amount (the amount, currency, date and type are datatype properties below). ABSTRACT: documents state the figures without naming the commitment as an entity; name it after what it commits (e.g. \"<Amount> institutional subscription commitment\").",
+      "iri": "https://contextbuilder.ai/ontology/investment#Commitment"
     },
     {
       "type": "LegalEntity",
       "parent": null,
       "spacy_labels": ["ORG"],
-      "guidance": "The formally incorporated legal person behind a party — the registered company, partnership, or trust.",
-      "iri": "http://example.org/investment#LegalEntity"
+      "guidance": "The formally registered legal identity behind an investor — the registered legal name as it appears in onboarding/KYC material, as distinct from the trading or colloquial name.",
+      "iri": "https://contextbuilder.ai/ontology/investment#LegalEntity"
     },
     {
-      "type": "MonetaryAmount",
+      "type": "CommercialTerms",
       "parent": null,
-      "spacy_labels": ["MONEY"],
-      "guidance": "A currency and numeric value representation, e.g., $5,000,000 or USD 10M.",
-      "iri": "http://example.org/investment#MonetaryAmount"
+      "abstract": true,
+      "spacy_labels": [],
+      "guidance": "The commercial arrangement governing an agreement — fees and related economics taken as a whole. ABSTRACT: documents describe the terms without naming them as an entity; name it after the agreement it belongs to (e.g. \"Commercial Terms for <AgreementId>\").",
+      "iri": "https://contextbuilder.ai/ontology/investment#CommercialTerms"
     },
     {
-      "type": "Date",
-      "parent": null,
-      "spacy_labels": ["DATE"],
-      "guidance": "An effective date, execution date, or termination date stated in text.",
-      "iri": "http://example.org/investment#Date"
-    },
-    {
-      "type": "Percentage",
-      "parent": null,
-      "spacy_labels": ["PERCENT"],
-      "guidance": "A percentage rate such as management fee rate, performance fee rate, or hurdle rate.",
-      "iri": "http://example.org/investment#Percentage"
-    },
-    {
-      "type": "Identifier",
+      "type": "FeeSchedule",
       "parent": null,
       "spacy_labels": [],
-      "guidance": "A formal identifier such as an LEI code, registration number, or contract identification code.",
-      "iri": "http://example.org/investment#Identifier"
+      "guidance": "The named fee schedule document defining the commercial terms, usually carrying its own reference (e.g. FS-2025-031).",
+      "iri": "https://contextbuilder.ai/ontology/investment#FeeSchedule"
+    },
+    {
+      "type": "Amendment",
+      "parent": null,
+      "spacy_labels": [],
+      "guidance": "A formal amendment to an agreement — the named amending document (e.g. AMENDMENT NO. 1, reference AMD-2025-007).",
+      "iri": "https://contextbuilder.ai/ontology/investment#Amendment"
+    },
+    {
+      "type": "SideLetter",
+      "parent": null,
+      "spacy_labels": [],
+      "guidance": "A side letter supplementing an agreement with additional or investor-specific provisions, usually carrying its own reference (e.g. SL-2025-006).",
+      "iri": "https://contextbuilder.ai/ontology/investment#SideLetter"
     }
   ],
   "relations": [
@@ -122,121 +100,187 @@
       "type": "hasInvestor",
       "domain": ["InvestmentRelationship"],
       "range": ["Investor"],
-      "guidance": "An investment relationship has an investor as one of its parties.",
-      "iri": "http://example.org/investment#hasInvestor"
+      "guidance": "The investment relationship is with this investor.",
+      "iri": "https://contextbuilder.ai/ontology/investment#hasInvestor"
     },
     {
       "type": "hasInvestmentManager",
       "domain": ["InvestmentRelationship"],
       "range": ["InvestmentManager"],
-      "guidance": "An investment relationship has an investment manager as its other party.",
-      "iri": "http://example.org/investment#hasInvestmentManager"
+      "guidance": "The investment relationship appoints this investment manager.",
+      "iri": "https://contextbuilder.ai/ontology/investment#hasInvestmentManager"
     },
     {
       "type": "governedBy",
       "domain": ["InvestmentRelationship"],
       "range": ["Agreement"],
-      "guidance": "An investment relationship is governed by an agreement.",
-      "iri": "http://example.org/investment#governedBy"
+      "guidance": "The investment relationship is governed by this agreement.",
+      "iri": "https://contextbuilder.ai/ontology/investment#governedBy"
     },
     {
       "type": "hasSubscription",
-      "domain": ["InvestmentRelationship", "Investor"],
+      "domain": ["InvestmentRelationship"],
       "range": ["Subscription"],
-      "guidance": "An investment relationship or investor executes a subscription.",
-      "iri": "http://example.org/investment#hasSubscription"
+      "guidance": "The investment relationship includes this subscription.",
+      "iri": "https://contextbuilder.ai/ontology/investment#hasSubscription"
     },
     {
-      "type": "partyToAgreement",
-      "domain": ["Investor", "InvestmentManager", "LegalEntity"],
-      "range": ["Agreement", "SideLetter", "Amendment"],
-      "guidance": "A party, manager, or legal entity that enters into or signs an agreement, side letter, or amendment.",
-      "iri": "http://example.org/investment#partyToAgreement"
-    },
-    {
-      "type": "managesFund",
-      "domain": ["InvestmentManager"],
-      "range": ["Fund"],
-      "guidance": "An investment manager manages, operates, or sponsors a fund.",
-      "iri": "http://example.org/investment#managesFund"
+      "type": "hasLegalEntity",
+      "domain": ["Investor"],
+      "range": ["LegalEntity"],
+      "guidance": "The investor is backed by this formally incorporated legal entity.",
+      "iri": "https://contextbuilder.ai/ontology/investment#hasLegalEntity"
     },
     {
       "type": "investsInFund",
-      "domain": ["Subscription", "Investor"],
+      "domain": ["Subscription"],
       "range": ["Fund"],
-      "guidance": "A subscription or investor invests directly into a named fund.",
-      "iri": "http://example.org/investment#investsInFund"
+      "guidance": "The subscription invests into this named fund.",
+      "iri": "https://contextbuilder.ai/ontology/investment#investsInFund"
     },
     {
       "type": "hasCommitment",
-      "domain": ["Subscription", "Investor", "InvestmentRelationship"],
+      "domain": ["Subscription"],
       "range": ["Commitment"],
-      "guidance": "A subscription, investor, or relationship carries a capital commitment obligation.",
-      "iri": "http://example.org/investment#hasCommitment"
+      "guidance": "The subscription carries this capital commitment.",
+      "iri": "https://contextbuilder.ai/ontology/investment#hasCommitment"
     },
     {
       "type": "hasCommercialTerms",
-      "domain": ["Agreement", "SideLetter", "Amendment"],
+      "domain": ["Agreement"],
       "range": ["CommercialTerms"],
-      "guidance": "An agreement, side letter, or amendment sets out commercial terms.",
-      "iri": "http://example.org/investment#hasCommercialTerms"
+      "guidance": "The agreement sets out these commercial terms.",
+      "iri": "https://contextbuilder.ai/ontology/investment#hasCommercialTerms"
     },
     {
       "type": "definedByFeeSchedule",
-      "domain": ["CommercialTerms", "Agreement"],
+      "domain": ["CommercialTerms"],
       "range": ["FeeSchedule"],
-      "guidance": "Commercial terms or agreements are defined by a fee schedule.",
-      "iri": "http://example.org/investment#definedByFeeSchedule"
+      "guidance": "The commercial terms are defined by this fee schedule.",
+      "iri": "https://contextbuilder.ai/ontology/investment#definedByFeeSchedule"
     },
     {
       "type": "amendedBy",
       "domain": ["Agreement"],
       "range": ["Amendment"],
-      "guidance": "An agreement is amended by an amendment document.",
-      "iri": "http://example.org/investment#amendedBy"
+      "guidance": "The agreement is amended by this amendment.",
+      "iri": "https://contextbuilder.ai/ontology/investment#amendedBy"
     },
     {
       "type": "supplementedBy",
       "domain": ["Agreement"],
       "range": ["SideLetter"],
-      "guidance": "An agreement is supplemented by a side letter.",
-      "iri": "http://example.org/investment#supplementedBy"
-    },
-    {
-      "type": "hasLegalEntity",
-      "domain": ["Investor", "InvestmentManager", "Fund"],
-      "range": ["LegalEntity"],
-      "guidance": "An investor, manager, or fund is backed by a formally incorporated legal entity.",
-      "iri": "http://example.org/investment#hasLegalEntity"
-    },
-    {
-      "type": "hasValueAmount",
-      "domain": ["Commitment", "CommercialTerms", "FeeSchedule"],
-      "range": ["MonetaryAmount"],
-      "guidance": "A commitment or commercial term has a specific monetary value amount.",
-      "iri": "http://example.org/investment#hasValueAmount"
-    },
-    {
-      "type": "hasFeeRate",
-      "domain": ["CommercialTerms", "FeeSchedule"],
-      "range": ["Percentage"],
-      "guidance": "A commercial term or fee schedule defines a fee percentage rate.",
-      "iri": "http://example.org/investment#hasFeeRate"
-    },
-    {
-      "type": "effectiveOnDate",
-      "domain": ["Agreement", "Amendment", "SideLetter", "Subscription"],
-      "range": ["Date"],
-      "guidance": "The effective or execution date of a document or subscription.",
-      "iri": "http://example.org/investment#effectiveOnDate"
-    },
-    {
-      "type": "hasIdentifier",
-      "domain": ["LegalEntity", "Investor", "InvestmentManager", "Agreement"],
-      "range": ["Identifier"],
-      "guidance": "An entity or agreement has an official registration number, LEI, or reference identifier.",
-      "iri": "http://example.org/investment#hasIdentifier"
+      "guidance": "The agreement is supplemented by this side letter.",
+      "iri": "https://contextbuilder.ai/ontology/investment#supplementedBy"
     }
   ],
+  "datatype_properties": [
+    {
+      "property": "agreementId",
+      "domain": "Agreement",
+      "range": "identifier",
+      "guidance": "The agreement's reference number as printed (e.g. IMA-2025-018).",
+      "iri": "https://contextbuilder.ai/ontology/investment#agreementId"
+    },
+    {
+      "property": "agreementType",
+      "domain": "Agreement",
+      "range": "string",
+      "guidance": "The kind of agreement (e.g. Investment Management Agreement).",
+      "iri": "https://contextbuilder.ai/ontology/investment#agreementType"
+    },
+    {
+      "property": "effectiveDate",
+      "domain": "Agreement",
+      "range": "date",
+      "guidance": "The date the agreement takes effect.",
+      "iri": "https://contextbuilder.ai/ontology/investment#effectiveDate"
+    },
+    {
+      "property": "governingLaw",
+      "domain": "Agreement",
+      "range": "string",
+      "guidance": "The governing law / jurisdiction clause (e.g. laws of England and Wales).",
+      "iri": "https://contextbuilder.ai/ontology/investment#governingLaw"
+    },
+    {
+      "property": "reportingFrequency",
+      "domain": "Agreement",
+      "range": "string",
+      "guidance": "How often the manager reports to the investor (e.g. Quarterly).",
+      "iri": "https://contextbuilder.ai/ontology/investment#reportingFrequency"
+    },
+    {
+      "property": "name",
+      "domain": "Investor",
+      "range": "string",
+      "guidance": "The investor's name as stated.",
+      "iri": "https://contextbuilder.ai/ontology/investment#name"
+    },
+    {
+      "property": "fundName",
+      "domain": "Fund",
+      "range": "string",
+      "guidance": "The fund's name as stated.",
+      "iri": "https://contextbuilder.ai/ontology/investment#fundName"
+    },
+    {
+      "property": "subscriptionId",
+      "domain": "Subscription",
+      "range": "identifier",
+      "guidance": "The subscription's reference number as printed (e.g. SUB-2025-041).",
+      "iri": "https://contextbuilder.ai/ontology/investment#subscriptionId"
+    },
+    {
+      "property": "commitmentAmount",
+      "domain": "Commitment",
+      "range": "number",
+      "guidance": "The committed capital figure (the currency is a separate property).",
+      "iri": "https://contextbuilder.ai/ontology/investment#commitmentAmount"
+    },
+    {
+      "property": "currency",
+      "domain": "Commitment",
+      "range": "string",
+      "guidance": "The commitment's currency code (e.g. USD).",
+      "iri": "https://contextbuilder.ai/ontology/investment#currency"
+    },
+    {
+      "property": "commitmentDate",
+      "domain": "Commitment",
+      "range": "date",
+      "guidance": "The date the capital commitment was made or becomes effective.",
+      "iri": "https://contextbuilder.ai/ontology/investment#commitmentDate"
+    },
+    {
+      "property": "commitmentType",
+      "domain": "Commitment",
+      "range": "string",
+      "guidance": "The kind of commitment (e.g. Institutional Commitment).",
+      "iri": "https://contextbuilder.ai/ontology/investment#commitmentType"
+    },
+    {
+      "property": "legalEntityName",
+      "domain": "LegalEntity",
+      "range": "string",
+      "guidance": "The registered legal name exactly as recorded.",
+      "iri": "https://contextbuilder.ai/ontology/investment#legalEntityName"
+    },
+    {
+      "property": "entityType",
+      "domain": "LegalEntity",
+      "range": "string",
+      "guidance": "The legal entity classification (e.g. Public Limited Company, Public Pension Trust).",
+      "iri": "https://contextbuilder.ai/ontology/investment#entityType"
+    },
+    {
+      "property": "registrationNumber",
+      "domain": "LegalEntity",
+      "range": "identifier",
+      "guidance": "The company/entity registration number as printed.",
+      "iri": "https://contextbuilder.ai/ontology/investment#registrationNumber"
+    }
+  ],
+  "regex_patterns": [],
   "dep_patterns": []
 }
