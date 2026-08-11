@@ -69,6 +69,8 @@ CAPABILITY_SCHEMA: Dict[str, Any] = {
                                    "description": "Number of independent LLM relation-extraction runs made for the batch (1 when self-consistency voting is off, KG-AC-67)"},
         "chunk_metadata_missing_count": {"type": "integer", "always_present": True,
                                          "description": "Chunks whose chunk_metadata lacked a doc_id or page, so document/page provenance recorded null rather than a fabricated value (KG-AC-73)"},
+        "unresolved_reference_count": {"type": "integer", "always_present": True,
+                                       "description": "Relations whose src_id/dst_id did not resolve to an entity in the same LLM call's own response (KG-AC-71)"},
     },
     "artifact_inputs": {
         "chunks": {"required": "always",

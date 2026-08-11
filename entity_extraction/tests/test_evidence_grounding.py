@@ -103,8 +103,7 @@ def test_run_pipeline_reports_ungrounded_relations_in_summary():
                     {"type": "Bond", "surface": "Acme 5% 2030", "confidence": 0.8},
                 ],
                 "relations": [
-                    {"type": "issues", "src": "Acme Corp", "src_type": "Organization",
-                     "dst": "Acme 5% 2030", "dst_type": "Bond", "confidence": 0.7,
+                    {"type": "issues", "src_id": 0, "dst_id": 1, "confidence": 0.7,
                      "evidence": "Acme Corp secretly issues something else entirely."},
                 ],
             }

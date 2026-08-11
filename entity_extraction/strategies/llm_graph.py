@@ -1,5 +1,16 @@
 """LLM graph extraction — entities AND relations in ONE call (ADR-0009; evolve v5, KG-AC-43).
 
+**Evolve v13 (KG-AC-71): identifier-based binding.** A relation item no longer re-types a
+`src`/`src_type`/`dst`/`dst_type` surface pair — it references `src_id`/`dst_id`, the 0-based
+position of the entity within THIS SAME response's `entities` array (no id field is asked of the
+model on the entity side; array position IS the id, the same mechanism `llm_classify.py`'s
+`pair_index` already uses). The strategy resolves each id to the `Candidate` it already built and
+stamps `Relation.src_surface`/`src_type`/`dst_surface`/`dst_type` from THAT object — so a binding
+can never fail from the model re-stating a surface form imperfectly (the prior, uncounted failure
+mode: any drift in case/whitespace/type silently dropped the edge at `build_edge_records`'s
+`(chunk, type, surface)` lookup). An id absent from the response's own `entities` array is dropped
+and counted on `self.unresolved_reference_count`.
+
 **Evolve v6 (2026-08-05):** schema-constraint is now enforced via Bedrock's native Converse
 tool-use (a forced tool call whose arguments are validated against a JSON schema by the model
 provider), not requested via prompt-only "return STRICT JSON" instructions. The vocabulary is
@@ -66,6 +77,11 @@ def build_graph_system_prompt(pack) -> str:
         "text, not just once per distinct name. If \"Acme Corp\" is mentioned three times, return "
         "three separate entity items for it, not one. Do not deduplicate repeated mentions into a "
         "single item.\n\n"
+        "Relations: reference entities by POSITION, not by repeating their text. Each entity in "
+        "your response is identified by its 0-based position in the entities array (the first "
+        "entity is position 0, the second is position 1, and so on). When recording a relation, "
+        "set src_id/dst_id to that position — do not restate the entity's surface text or type in "
+        "the relation.\n\n"
         "Every relation MUST include the exact source sentence it was stated in as \"evidence\" — "
         "omit a relation entirely if you cannot quote a supporting sentence."
     )
@@ -100,14 +116,12 @@ def build_graph_tool_schema(pack) -> Dict[str, Any]:
         "type": "object",
         "properties": {
             "type": {"type": "string", "enum": relation_types} if relation_types else {"type": "string"},
-            "src": {"type": "string"},
-            "src_type": {"type": "string", "enum": entity_types},
-            "dst": {"type": "string"},
-            "dst_type": {"type": "string", "enum": entity_types},
+            "src_id": {"type": "integer", "description": "0-based position of the source entity in this response's entities array"},
+            "dst_id": {"type": "integer", "description": "0-based position of the destination entity in this response's entities array"},
             "confidence": {"type": "number"},
             "evidence": {"type": "string"},
         },
-        "required": ["type", "src", "src_type", "dst", "dst_type", "evidence"],
+        "required": ["type", "src_id", "dst_id", "evidence"],
     }
     return {
         "type": "object",
@@ -141,6 +155,7 @@ class LlmGraphStrategy(EntityStrategy):
     def __init__(self, llm_client: Any = None):
         self._client = llm_client
         self.relations: List[Relation] = []
+        self.unresolved_reference_count = 0  # KG-AC-71 (v13) — src_id/dst_id absent from entities[]
 
     def extract(self, chunks: List[Chunk], config: ExtractionConfig, pack) -> List[Candidate]:
         if self._client is None:
@@ -155,18 +170,25 @@ class LlmGraphStrategy(EntityStrategy):
                 tool_name=_TOOL_NAME, tool_description=_TOOL_DESCRIPTION, tool_schema=tool_schema,
             )  # LlmOutputError propagates uncaught (KG-AC-P3 — fails the whole folder, not skip-and-count)
             seen_surface: dict = {}
-            for item in data.get("entities", []) or []:
+            # KG-AC-71: keyed by RAW response position (not post-filter list position) — an invalid/
+            # skipped entity item leaves no entry, so a relation referencing that position is
+            # correctly unresolved, matching what the model was actually told ("0-based position in
+            # the entities array" means the array it emitted, not our filtered view of it).
+            by_raw_index: Dict[int, Candidate] = {}
+            for raw_idx, item in enumerate(data.get("entities", []) or []):
                 etype, surface = item.get("type"), item.get("surface")
                 if not etype or not surface:
                     continue
                 occ = seen_surface.get(surface, 0)
                 seen_surface[surface] = occ + 1
                 span = find_span(ch.text, surface, occ)
-                entities.append(Candidate(
+                cand = Candidate(
                     surface_form=surface, entity_type=etype, source_chunk_id=ch.chunk_id, layer="llm",
                     span_start=span[0] if span else None, span_end=span[1] if span else None,
                     confidence=float(item.get("confidence", 0.7)),
-                ))
+                )
+                entities.append(cand)
+                by_raw_index[raw_idx] = cand
             relations_raw = data.get("relations")
             if isinstance(relations_raw, list):  # KG-AC-43: missing/malformed -> entities-only, no crash
                 for item in relations_raw:
@@ -174,11 +196,16 @@ class LlmGraphStrategy(EntityStrategy):
                     evidence = item.get("evidence")
                     if not rtype or not evidence:  # KG-AC-46: evidence is mandatory -- drop if absent
                         continue
+                    src_id, dst_id = item.get("src_id"), item.get("dst_id")
+                    src_cand, dst_cand = by_raw_index.get(src_id), by_raw_index.get(dst_id)
+                    if src_cand is None or dst_cand is None:  # KG-AC-71: id not in this response's own entities[]
+                        self.unresolved_reference_count += 1
+                        continue
                     relations.append(Relation(
                         relation_type=rtype, source_chunk_id=ch.chunk_id,
                         confidence=float(item.get("confidence", 0.6)),
-                        src_surface=item.get("src", ""), src_type=item.get("src_type", ""),
-                        dst_surface=item.get("dst", ""), dst_type=item.get("dst_type", ""),
+                        src_surface=src_cand.surface_form, src_type=src_cand.entity_type,
+                        dst_surface=dst_cand.surface_form, dst_type=dst_cand.entity_type,
                         evidence_text=evidence, extractor="llm",
                     ))
         self.relations = relations

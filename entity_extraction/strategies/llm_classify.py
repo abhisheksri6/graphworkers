@@ -81,6 +81,10 @@ class LlmClassifyStrategy:
     def __init__(self, llm_client: Any = None, batch_size: int = _DEFAULT_BATCH_SIZE):
         self._client = llm_client
         self._batch_size = batch_size
+        # KG-AC-71 (v13): this mode was ALREADY id-based (pair_index into a deterministically
+        # pre-computed batch, never a re-typed surface) — the one gap was an out-of-range index
+        # being silently dropped, uncounted. Fixed here to match KG-AC-71's counting requirement.
+        self.unresolved_reference_count = 0
 
     def classify(self, pairs: List[CandidatePair], chunk_text_by_id: Dict[str, str]) -> List[Relation]:
         if not pairs:
@@ -106,6 +110,7 @@ class LlmClassifyStrategy:
                 for label in data.get("labels", []) or []:
                     idx = label.get("pair_index")
                     if not isinstance(idx, int) or not (0 <= idx < len(batch)):
+                        self.unresolved_reference_count += 1  # KG-AC-71
                         continue
                     rtype = label.get("relation_type")
                     if not rtype or rtype == "no_relation":

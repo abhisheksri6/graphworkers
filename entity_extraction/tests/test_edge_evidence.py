@@ -40,8 +40,7 @@ def test_relation_with_evidence_is_kept():
             {"type": "Bond", "surface": "Acme 5% 2030", "confidence": 0.8},
         ],
         "relations": [
-            {"type": "issues", "src": "Acme Corp", "src_type": "Organization",
-             "dst": "Acme 5% 2030", "dst_type": "Bond", "confidence": 0.7,
+            {"type": "issues", "src_id": 0, "dst_id": 1, "confidence": 0.7,
              "evidence": "Acme Corp issues Acme 5% 2030."},
         ],
     }
@@ -60,10 +59,8 @@ def test_relation_without_evidence_is_dropped():
             {"type": "Person", "surface": "Jane Roe", "confidence": 0.9},
         ],
         "relations": [
-            {"type": "issues", "src": "Acme Corp", "src_type": "Organization",
-             "dst": "Acme 5% 2030", "dst_type": "Bond", "confidence": 0.7},
-            {"type": "employs", "src": "Acme Corp", "src_type": "Organization",
-             "dst": "Jane Roe", "dst_type": "Person", "confidence": 0.6,
+            {"type": "issues", "src_id": 0, "dst_id": 1, "confidence": 0.7},  # no evidence -> dropped
+            {"type": "employs", "src_id": 0, "dst_id": 2, "confidence": 0.6,
              "evidence": "Acme Corp employs Jane Roe."},
         ],
     }

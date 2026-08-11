@@ -35,8 +35,7 @@ _ONE_RESPONSE = {
         {"type": "Bond", "surface": "Acme 5% 2030", "confidence": 0.8},
     ],
     "relations": [
-        {"type": "issues", "src": "Acme Corp", "src_type": "Organization",
-         "dst": "Acme 5% 2030", "dst_type": "Bond", "confidence": 0.7,
+        {"type": "issues", "src_id": 0, "dst_id": 1, "confidence": 0.7,
          "evidence": "Acme Corp issues Acme 5% 2030."},
     ],
 }
@@ -69,11 +68,9 @@ def test_k3_majority_voting_and_vote_fraction_confidence():
         {"type": "Bond", "surface": "Acme 5% 2030", "confidence": 0.8},
         {"type": "Bond", "surface": "Acme 7% 2035", "confidence": 0.8},
     ]
-    majority_rel = {"type": "issues", "src": "Acme Corp", "src_type": "Organization",
-                    "dst": "Acme 5% 2030", "dst_type": "Bond",
+    majority_rel = {"type": "issues", "src_id": 0, "dst_id": 1,
                     "evidence": "Acme Corp issues Acme 5% 2030."}
-    minority_rel = {"type": "issues", "src": "Acme Corp", "src_type": "Organization",
-                    "dst": "Acme 7% 2035", "dst_type": "Bond",
+    minority_rel = {"type": "issues", "src_id": 0, "dst_id": 2,
                     "evidence": "It also issues Acme 7% 2035."}
     responses = [
         {"entities": entities, "relations": [dict(majority_rel, confidence=0.7), dict(minority_rel, confidence=0.5)]},

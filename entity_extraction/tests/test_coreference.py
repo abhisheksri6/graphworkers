@@ -95,8 +95,7 @@ def test_coreference_enabled_resolves_anaphor_so_relation_attaches_to_antecedent
             {"type": "Person", "surface": "Jane Roe", "confidence": 0.9},
         ],
         "relations": [
-            {"type": "employs", "src": "Acme Corp", "src_type": "Organization",
-             "dst": "Jane Roe", "dst_type": "Person", "confidence": 0.7,
+            {"type": "employs", "src_id": 0, "dst_id": 1, "confidence": 0.7,
              "evidence": "Acme Corp employs Jane Roe."},
         ],
     }

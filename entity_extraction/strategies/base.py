@@ -145,11 +145,17 @@ def validate_relations(
 # -- orchestration (impure — instantiates the injected strategies) ---------
 def run_graph_extraction(chunks: List[Chunk], config: ExtractionConfig, pack, *,
                          spacy_model_path=None, spacy_nlp=None,
-                         llm_client=None) -> Tuple[List[Candidate], List[Relation]]:
+                         llm_client=None,
+                         unresolved_reference_sink: Optional[List[int]] = None,
+                         ) -> Tuple[List[Candidate], List[Relation]]:
     """KG-AC-43/44: the active entity layer(s) + relations for this config. ``engine=spacy`` is
     entity-only (zero relations, KG-AC-44). ``engine=llm`` emits entities AND relations from ONE
     call per chunk via ``LlmGraphStrategy`` (KG-AC-43). ``spacy_nlp`` is a pass-through test seam
-    mirroring ``SpacyNerStrategy``'s own ``nlp=`` param."""
+    mirroring ``SpacyNerStrategy``'s own ``nlp=`` param. ``unresolved_reference_sink`` (KG-AC-71,
+    v13): an optional mutable out-list — when provided and ``generate`` mode is active, the
+    strategy's own ``unresolved_reference_count`` is appended to it. A plain out-parameter (not a
+    3rd return value) so this function's existing 2-tuple return shape — depended on by several
+    call sites, including test harnesses that unpack it directly — never changes."""
     from .llm_graph import LlmGraphStrategy
     from .rules_entities import RulesEntitiesStrategy
     from .rules_relations import RulesRelationsStrategy
@@ -178,6 +184,8 @@ def run_graph_extraction(chunks: List[Chunk], config: ExtractionConfig, pack, *,
             relations = graph.relations             # classify, this SAME call's relations are
             # discarded; entities from it are still used. Classify's own relations come from
             # llm_classify.py via run_pipeline (needs the post-merge entity set), not here.
+            if unresolved_reference_sink is not None:
+                unresolved_reference_sink.append(graph.unresolved_reference_count)  # KG-AC-71
     else:
         raise ValueError(f"unknown entity engine: {config.engine!r}")
 
@@ -229,9 +237,16 @@ def run_pipeline(chunks: List[Chunk], config: ExtractionConfig, pack, *, folder_
         from .spacy_ner import load_spacy_model
         shared_nlp = load_spacy_model(spacy_model_path)
 
+    # KG-AC-71 (v13): accumulates unresolved_reference_count across every LLM relation call made for
+    # this pipeline run — run 1 AND every self-consistency repeat, whichever mode is active. A plain
+    # mutable list (not a running int) so run_graph_extraction's optional out-parameter and the
+    # closures below can all append to the SAME accumulator without a `nonlocal` declaration.
+    unresolved_counts: List[int] = []
+
     candidates, raw_relations = run_graph_extraction(
         chunks, config, pack, spacy_model_path=spacy_model_path,
         spacy_nlp=shared_nlp, llm_client=llm_client,
+        unresolved_reference_sink=unresolved_counts,
     )
     if config.coreference_enabled:
         candidates = filter_bare_pronouns(candidates)
@@ -272,14 +287,17 @@ def run_pipeline(chunks: List[Chunk], config: ExtractionConfig, pack, *, folder_
         sentence_spans = {ch.chunk_id: [(s.start_char, s.end_char) for s in shared_nlp(ch.text).sents]
                           for ch in chunks}
         pairs = enumerate_candidate_pairs(merged, sentence_spans, pack)
-        llm_relations_run1 = LlmClassifyStrategy(llm_client=llm_client).classify(pairs, chunk_text_by_id)
+        classify_strategy = LlmClassifyStrategy(llm_client=llm_client)
+        llm_relations_run1 = classify_strategy.classify(pairs, chunk_text_by_id)
+        unresolved_counts.append(classify_strategy.unresolved_reference_count)  # KG-AC-71
     elif config.relation_strategy == "entity_scoped":
         # KG-AC-65 (evolve v12): one call per chunk over the FINAL merged entity set — no
         # candidate-pair enumeration, no sentence-boundary nlp needed at all (unlike classify).
         # Lazy RELATIVE import, same safety reasoning as llm_classify's import above.
         from .llm_entity_scoped import LlmEntityScopedStrategy
-        llm_relations_run1 = LlmEntityScopedStrategy(llm_client=llm_client).extract(
-            merged, chunk_text_by_id, pack)
+        entity_scoped_strategy = LlmEntityScopedStrategy(llm_client=llm_client)
+        llm_relations_run1 = entity_scoped_strategy.extract(merged, chunk_text_by_id, pack)
+        unresolved_counts.append(entity_scoped_strategy.unresolved_reference_count)  # KG-AC-71
     # else "generate": llm_relations_run1 is already set, from run_graph_extraction's own call.
 
     # KG-AC-67 (evolve v12): self-consistency voting. k<=1 is an EXACT no-op — byte-identical
@@ -294,17 +312,27 @@ def run_pipeline(chunks: List[Chunk], config: ExtractionConfig, pack, *, folder_
         self_consistency_votes = 1
     else:
         def _one_more_llm_relation_run() -> List[Relation]:
+            # KG-AC-71: each repeat call's own unresolved_reference_count is appended to the SAME
+            # outer accumulator as run 1's — every LLM relation call this pipeline run makes is
+            # counted, not just the first.
             if config.relation_strategy == "classify":
                 from .llm_classify import LlmClassifyStrategy
-                return LlmClassifyStrategy(llm_client=llm_client).classify(pairs, chunk_text_by_id)
+                strategy = LlmClassifyStrategy(llm_client=llm_client)
+                result = strategy.classify(pairs, chunk_text_by_id)
+                unresolved_counts.append(strategy.unresolved_reference_count)
+                return result
             if config.relation_strategy == "entity_scoped":
                 from .llm_entity_scoped import LlmEntityScopedStrategy
-                return LlmEntityScopedStrategy(llm_client=llm_client).extract(merged, chunk_text_by_id, pack)
+                strategy = LlmEntityScopedStrategy(llm_client=llm_client)
+                result = strategy.extract(merged, chunk_text_by_id, pack)
+                unresolved_counts.append(strategy.unresolved_reference_count)
+                return result
             # "generate": re-invoke LlmGraphStrategy fresh; its entities are discarded here, only
             # .relations is read (relative import, same safety posture as the imports above).
             from .llm_graph import LlmGraphStrategy
             graph = LlmGraphStrategy(llm_client=llm_client)
             graph.extract(chunks, config, pack)
+            unresolved_counts.append(graph.unresolved_reference_count)
             return graph.relations
 
         runs = [llm_relations_run1] + [_one_more_llm_relation_run() for _ in range(k - 1)]
@@ -320,6 +348,7 @@ def run_pipeline(chunks: List[Chunk], config: ExtractionConfig, pack, *, folder_
     summary = build_summary(ent_rows, edge_rows, config.ontology_pack, pack.version,
                             unmapped, config.promote_top_n, ungrounded_relation_count=ungrounded,
                             self_consistency_votes=self_consistency_votes,
-                            chunk_metadata_missing_count=chunk_metadata_missing_count)
+                            chunk_metadata_missing_count=chunk_metadata_missing_count,
+                            unresolved_reference_count=sum(unresolved_counts))
     usage = list(getattr(llm_client, "usage", []) or [])
     return ent_rows, edge_rows, summary, usage, guardrails_blocked

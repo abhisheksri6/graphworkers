@@ -51,9 +51,10 @@ _GRAPH_RESPONSE = {
         {"type": "Organization", "surface": "Acme Corp", "confidence": 0.9},
         {"type": "Bond", "surface": "Acme 5% 2030", "confidence": 0.8},
     ],
+    # KG-AC-71 (v13): relations reference entities by 0-based position in THIS response's own
+    # entities array (src_id/dst_id), never by re-typing a surface/type pair.
     "relations": [
-        {"type": "issues", "src": "Acme Corp", "src_type": "Organization",
-         "dst": "Acme 5% 2030", "dst_type": "Bond", "confidence": 0.7,
+        {"type": "issues", "src_id": 0, "dst_id": 1, "confidence": 0.7,
          "evidence": "Acme Corp issues Acme 5% 2030."},
     ],
 }
@@ -91,13 +92,21 @@ def test_illegal_relation_pairing_dropped_by_validate():
 
 @pytest.mark.ac("KG-AC-43")
 def test_dangling_endpoint_relation_dropped_at_edge_build():
-    # the relation names a dst entity ("Ghost Corp") that was never extracted -> dropped, not written.
+    # KG-AC-71 (v13): under id-based binding, a relation can only reference an entity that WAS in
+    # the SAME response's entities[] -- the model can no longer name a never-extracted entity (that
+    # case is caught earlier, as an unresolved reference, see test_id_binding.py). The
+    # dangling-endpoint drop this test proves is still real, just reached a different way now: an
+    # id resolves successfully INSIDE the strategy (producing a valid Relation), but the closed-
+    # vocab filter drops that entity afterward (an out-of-vocab type) -- so by the time
+    # build_edge_records runs, its key is absent from entity_uid_by_key.
     # 'evidence' is present AND verbatim in the chunk text so the drop is isolated to the
     # dangling-endpoint reason, not KG-AC-46 (missing evidence) or KG-AC-64 (ungrounded evidence).
     response = {
-        "entities": [{"type": "Organization", "surface": "Acme Corp", "confidence": 0.9}],
-        "relations": [{"type": "issues", "src": "Acme Corp", "src_type": "Organization",
-                       "dst": "Ghost Corp", "dst_type": "Organization", "confidence": 0.5,
+        "entities": [
+            {"type": "Organization", "surface": "Acme Corp", "confidence": 0.9},
+            {"type": "Cryptocurrency", "surface": "Ghost Corp", "confidence": 0.5},  # out-of-vocab
+        ],
+        "relations": [{"type": "issues", "src_id": 0, "dst_id": 1, "confidence": 0.5,
                        "evidence": "Acme Corp issues something to Ghost Corp."}],
     }
     client = _FakeLlmClient([response])
@@ -105,9 +114,10 @@ def test_dangling_endpoint_relation_dropped_at_edge_build():
     ent_rows, edge_rows, summary, usage, blocked = run_pipeline(
         [Chunk("c1", "Acme Corp issues something to Ghost Corp.")], cfg, FIBO, folder_id="f1", llm_client=client,
     )
-    assert len(ent_rows) == 1
-    assert edge_rows == []  # dangling dst -> dropped
+    assert len(ent_rows) == 1  # Ghost Corp dropped as out-of-vocab, not written
+    assert edge_rows == []  # dangling dst (its entity was filtered post-resolution) -> dropped
     assert summary["ungrounded_relation_count"] == 0  # isolated: not a grounding drop
+    assert summary["unresolved_reference_count"] == 0  # isolated: the id itself resolved fine
 
 
 @pytest.mark.ac("KG-AC-43")

@@ -312,6 +312,7 @@ def build_summary(
     entity_rows: List[Dict], edge_rows: List[Dict], ontology_pack: str, ontology_version: str,
     unmapped_type_count: int, promote_top_n: int = 10, ungrounded_relation_count: int = 0,
     self_consistency_votes: int = 1, chunk_metadata_missing_count: int = 0,
+    unresolved_reference_count: int = 0,
 ) -> Dict:
     """The KG-AC-9 state-plane scalar summary the callback promotes (no bulk rows on state).
     *Amended v11 — `linked_count` (gazetteer-link count) is dropped with that capability.*
@@ -321,7 +322,9 @@ def build_summary(
     self-consistency voting is off, the default).*
     *Amended v13 — `chunk_metadata_missing_count` (KG-AC-73) added: chunks whose `chunk_metadata`
     lacked a doc_id or page, so document/page provenance recorded null rather than a fabricated
-    value.*"""
+    value. `unresolved_reference_count` (KG-AC-71) added: relations whose src_id/dst_id did not
+    resolve to an entity in the same LLM call's own response, across every LLM relation call the
+    run made (run 1 and every self-consistency repeat).*"""
     distinct_types = len({r["entity_type"] for r in entity_rows})
     return {
         "entity_count": len(entity_rows),
@@ -334,6 +337,7 @@ def build_summary(
         "ungrounded_relation_count": ungrounded_relation_count,
         "self_consistency_votes": self_consistency_votes,
         "chunk_metadata_missing_count": chunk_metadata_missing_count,
+        "unresolved_reference_count": unresolved_reference_count,
     }
 
 

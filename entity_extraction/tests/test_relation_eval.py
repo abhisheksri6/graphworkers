@@ -225,7 +225,10 @@ def _run_llm_graph_relations_over_chunks(chunks_gold, pack, client):
     harness only; production now propagates a tool-call failure uncaught, KG-AC-P3 v6). Evolve v6:
     reuses the REAL complete_tool (Bedrock Converse tool-use). Returns predicted relation dicts +
     tool-call-valid/total counts (shared metric with KG-AC-P3, not re-gated here — proven in
-    test_entity_eval.py)."""
+    test_entity_eval.py). Evolve v13 (KG-AC-71): relations reference entities by src_id/dst_id
+    (0-based position in this SAME response's entities[]) — resolved here the same way
+    `LlmGraphStrategy.extract()` resolves them in production, so this measurement harness stays
+    faithful to what actually ships."""
     system_text = build_graph_system_prompt(pack)
     tool_schema = build_graph_tool_schema(pack)
     predicted, valid, total = [], 0, 0
@@ -240,14 +243,23 @@ def _run_llm_graph_relations_over_chunks(chunks_gold, pack, client):
             valid += 1
         except LlmOutputError:
             continue
+        by_raw_index = {}
+        for raw_idx, item in enumerate(data.get("entities") or []):
+            etype, surface = item.get("type"), item.get("surface")
+            if etype and surface:
+                by_raw_index[raw_idx] = (surface, etype)
         for item in (data.get("relations") or []):
             rtype = item.get("type")
             if not rtype:
                 continue
+            src = by_raw_index.get(item.get("src_id"))
+            dst = by_raw_index.get(item.get("dst_id"))
+            if src is None or dst is None:  # KG-AC-71: unresolved reference, not scored as a prediction
+                continue
             predicted.append({
                 "chunk_id": c["chunk_id"], "relation_type": rtype,
-                "src_type": item.get("src_type", ""), "src_surface": item.get("src", ""),
-                "dst_type": item.get("dst_type", ""), "dst_surface": item.get("dst", ""),
+                "src_surface": src[0], "src_type": src[1],
+                "dst_surface": dst[0], "dst_type": dst[1],
             })
     return predicted, valid, total
 

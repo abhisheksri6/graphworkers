@@ -38,8 +38,7 @@ def test_relation_between_cross_sentence_entities_is_returned():
     # rule (KG-AC-60) could never pair them; entity_scoped has no such gate.
     text = "Acme Corp was founded in 1990. Jane Roe joined as CEO in 2020."
     client = _FakeClient([{"relations": [
-        {"type": "employs", "src": "Acme Corp", "src_type": "Organization",
-         "dst": "Jane Roe", "dst_type": "Person", "confidence": 0.8,
+        {"type": "employs", "src_id": 0, "dst_id": 1, "confidence": 0.8,
          "evidence": "Jane Roe joined as CEO in 2020."},
     ]}])
     strat = LlmEntityScopedStrategy(llm_client=client)
@@ -62,8 +61,7 @@ def test_relation_between_cross_sentence_entities_is_returned():
 @pytest.mark.ac("KG-AC-65")
 def test_missing_evidence_dropped():
     client = _FakeClient([{"relations": [
-        {"type": "employs", "src": "Acme Corp", "src_type": "Organization",
-         "dst": "Jane Roe", "dst_type": "Person"},  # no 'evidence' key
+        {"type": "employs", "src_id": 0, "dst_id": 1},  # no 'evidence' key
     ]}])
     strat = LlmEntityScopedStrategy(llm_client=client)
     relations = strat.extract(
@@ -75,8 +73,7 @@ def test_missing_evidence_dropped():
 @pytest.mark.ac("KG-AC-65")
 def test_no_relation_type_dropped():
     client = _FakeClient([{"relations": [
-        {"src": "Acme Corp", "src_type": "Organization", "dst": "Jane Roe",
-         "dst_type": "Person", "evidence": "text"},  # no 'type' key
+        {"src_id": 0, "dst_id": 1, "evidence": "text"},  # no 'type' key
     ]}])
     strat = LlmEntityScopedStrategy(llm_client=client)
     relations = strat.extract(
@@ -177,8 +174,7 @@ def test_run_pipeline_entity_scoped_end_to_end():
                 ], "relations": []}  # generate-mode relations intentionally absent
             if tool_name == "extract_relations_for_entities":
                 return {"relations": [
-                    {"type": "employs", "src": "Acme Corp", "src_type": "Organization",
-                     "dst": "Jane Roe", "dst_type": "Person", "confidence": 0.8,
+                    {"type": "employs", "src_id": 0, "dst_id": 1, "confidence": 0.8,
                      "evidence": "Jane Roe joined Acme Corp."}]}
             raise AssertionError(f"unexpected tool_name {tool_name!r}")
 
@@ -216,9 +212,9 @@ def test_run_pipeline_entity_scoped_drops_ungrounded_and_illegal_relations():
                 ], "relations": []}
             if tool_name == "extract_relations_for_entities":
                 return {"relations": [
-                    # illegal domain/range: a Person cannot "issue" a Bond per FIBO
-                    {"type": "issues", "src": "Jane Roe", "src_type": "Person",
-                     "dst": "Acme 5% 2030", "dst_type": "Bond", "confidence": 0.5,
+                    # illegal domain/range: a Person cannot "issue" a Bond per FIBO -- the id itself
+                    # resolves fine (isolating this as a domain/range drop, not an unresolved one)
+                    {"type": "issues", "src_id": 0, "dst_id": 1, "confidence": 0.5,
                      "evidence": "Jane Roe issues Acme 5% 2030."},
                 ]}
             raise AssertionError(tool_name)
