@@ -48,6 +48,12 @@ _PROMPT_CACHE_MODEL_PREFIXES = ("anthropic.", "amazon.nova")
 # mandatory full-sentence `evidence` field to every relation -- a dense chunk's tool-call JSON can
 # exceed that, producing a deterministic (temperature=0) malformed-tool-use failure on BOTH the
 # original attempt and the identical-parameter retry. Raised for real headroom.
+# KG-AC-87 (evolve v13): this is now only the DEFAULT -- a profile whose document/pack combination
+# needs more room (a large `datatype_properties` vocabulary, entity_types count, or a document fed
+# as one large chunk, e.g. runtime preview) can raise it via `entity_extraction_config.llm_max_tokens`
+# without a code change. Found live 2026-08-11: investment_fibo v2.1's 42-property vocabulary +
+# KG-AC-63's per-occurrence entity emission, over a multi-page runtime-preview sample fed as ONE
+# chunk, hit this cap on BOTH attempts (a genuine, reproducible KG-AC-P3 hard failure, not a bug).
 _MAX_TOKENS = 4096
 
 
@@ -93,9 +99,12 @@ def _decrypt_connection(profile_ref: str, expected_category: str) -> Tuple[str, 
 
 
 def _bedrock_converse(cfg: Dict[str, Any], *, model: str, system_blocks: Optional[List[Dict[str, Any]]],
-                      messages: List[Dict[str, Any]], tool_config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                      messages: List[Dict[str, Any]], tool_config: Optional[Dict[str, Any]] = None,
+                      max_tokens: int = _MAX_TOKENS) -> Dict[str, Any]:
     """Invoke Bedrock's Converse API — model-family-agnostic (Claude + Nova use the SAME request
-    shape here, unlike the old raw invoke_model bodies). Returns the raw Converse response dict."""
+    shape here, unlike the old raw invoke_model bodies). Returns the raw Converse response dict.
+    ``max_tokens`` (KG-AC-87): defaults to the module cap, overridable per-call by the caller
+    (``BedrockLlmClient`` threads its own resolved value through)."""
     import boto3  # lazy — only when an AWS LLM connection is actually used
 
     session = boto3.Session(
@@ -109,7 +118,7 @@ def _bedrock_converse(cfg: Dict[str, Any], *, model: str, system_blocks: Optiona
     kwargs: Dict[str, Any] = {
         "modelId": model,
         "messages": messages,
-        "inferenceConfig": {"temperature": 0.0, "maxTokens": _MAX_TOKENS},
+        "inferenceConfig": {"temperature": 0.0, "maxTokens": max_tokens},
     }
     if system_blocks:
         kwargs["system"] = system_blocks
@@ -204,9 +213,13 @@ class BedrockLlmClient:
     """LLM client the extraction/coreference strategies consume."""
 
     def __init__(self, connection_id: str, *, model: Optional[str] = None,
+                 max_tokens: Optional[int] = None,
                  decrypt: Optional[Callable] = None, invoke: Optional[Callable] = None):
         self.connection_id = connection_id
         self._model = model
+        # KG-AC-87: None (unset/not configured on the profile) falls back to the module default,
+        # preserving today's behaviour exactly for every existing profile.
+        self._max_tokens = max_tokens if max_tokens is not None else _MAX_TOKENS
         self._decrypt = decrypt or _decrypt_connection
         self._invoke = invoke or _bedrock_converse
         self._cfg: Optional[Dict[str, Any]] = None
@@ -233,7 +246,7 @@ class BedrockLlmClient:
 
     def _call(self, *, system_blocks, messages, tool_config=None) -> Dict[str, Any]:
         try:
-            return self._invoke(self._cfg, model=self._resolved_model,
+            return self._invoke(self._cfg, model=self._resolved_model, max_tokens=self._max_tokens,
                                 system_blocks=system_blocks, messages=messages, tool_config=tool_config)
         except LlmHardFailure:
             raise
@@ -293,18 +306,18 @@ class BedrockLlmClient:
             output_tokens = (resp.get("usage") or {}).get("outputTokens")
             truncated_hint = (
                 " — output_tokens reached the maxTokens cap, response likely TRUNCATED"
-                if isinstance(output_tokens, int) and output_tokens >= _MAX_TOKENS else ""
+                if isinstance(output_tokens, int) and output_tokens >= self._max_tokens else ""
             )
             if attempt == 1:
                 logger.warning(
                     "tool call '%s' attempt 1 returned stopReason=%r (no valid tool_use), "
                     "output_tokens=%s (cap=%s)%s; retrying once",
-                    tool_name, stop_reason, output_tokens, _MAX_TOKENS, truncated_hint,
+                    tool_name, stop_reason, output_tokens, self._max_tokens, truncated_hint,
                 )
                 continue  # KG-AC-P3: exactly one retry on malformed_tool_use / tool not invoked
             logger.error(
                 "tool call '%s' failed on both attempts, stopReason=%r, output_tokens=%s (cap=%s)%s",
-                tool_name, stop_reason, output_tokens, _MAX_TOKENS, truncated_hint,
+                tool_name, stop_reason, output_tokens, self._max_tokens, truncated_hint,
             )
         raise LlmOutputError(
             f"tool call '{tool_name}' failed schema validation after one retry "
@@ -312,9 +325,11 @@ class BedrockLlmClient:
         )
 
 
-def build_llm_client(connection_id: Optional[str], model: Optional[str] = None) -> Optional[BedrockLlmClient]:
+def build_llm_client(connection_id: Optional[str], model: Optional[str] = None,
+                     max_tokens: Optional[int] = None) -> Optional[BedrockLlmClient]:
     """Return a client when a connection is configured, else None (the caller decides whether an
-    absent connection is fatal — llm engine/relation modes treat None as loud failure)."""
+    absent connection is fatal — llm engine/relation modes treat None as loud failure). ``max_tokens``
+    (KG-AC-87): None uses the client's own default (today's behaviour, unchanged)."""
     if not connection_id:
         return None
-    return BedrockLlmClient(connection_id, model=model)
+    return BedrockLlmClient(connection_id, model=model, max_tokens=max_tokens)

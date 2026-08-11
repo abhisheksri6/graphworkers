@@ -46,7 +46,7 @@ def test_decrypt_uses_llm_category():
         captured["category"] = expected_category
         return "aws_bedrock", {"region": "us-east-1", "model": "amazon.nova-pro-v1:0"}
 
-    def invoke(cfg, *, model, system_blocks, messages, tool_config=None):
+    def invoke(cfg, *, model, system_blocks, messages, tool_config=None, max_tokens=None):
         return _converse_response("ok", input_tokens=10, output_tokens=5)
 
     client = BedrockLlmClient("aws-llm-conn", decrypt=decrypt, invoke=invoke)
@@ -63,7 +63,7 @@ def test_llm_credentials_only_via_decrypt():
     def decrypt(profile, expected_category):
         return "aws_bedrock", {"aws_access_key_id": "AKIA_FROM_DECRYPT", "region": "eu-west-1", "model": "amazon.nova-pro-v1:0"}
 
-    def invoke(cfg, *, model, system_blocks, messages, tool_config=None):
+    def invoke(cfg, *, model, system_blocks, messages, tool_config=None, max_tokens=None):
         seen_cfg.update(cfg)
         return _converse_response("ok", input_tokens=1, output_tokens=1)
 
@@ -76,7 +76,7 @@ def test_usage_captured_llm_only():
     def decrypt(profile, expected_category):
         return "aws_bedrock", {"model": "amazon.nova-pro-v1:0"}
 
-    def invoke(cfg, *, model, system_blocks, messages, tool_config=None):
+    def invoke(cfg, *, model, system_blocks, messages, tool_config=None, max_tokens=None):
         return _converse_response("ok", input_tokens=120, output_tokens=40)
 
     client = BedrockLlmClient("c", decrypt=decrypt, invoke=invoke)
@@ -141,7 +141,7 @@ def test_complete_tool_retries_once_on_model_error_exception():
 
     calls = {"n": 0}
 
-    def invoke(cfg, *, model, system_blocks, messages, tool_config=None):
+    def invoke(cfg, *, model, system_blocks, messages, tool_config=None, max_tokens=None):
         calls["n"] += 1
         if calls["n"] == 1:
             raise _model_error_exception()
@@ -159,7 +159,7 @@ def test_complete_tool_raises_llm_output_error_when_model_error_persists():
     def decrypt(profile, expected_category):
         return "aws_bedrock", {"model": "amazon.nova-pro-v1:0"}
 
-    def invoke(cfg, *, model, system_blocks, messages, tool_config=None):
+    def invoke(cfg, *, model, system_blocks, messages, tool_config=None, max_tokens=None):
         raise _model_error_exception()
 
     client = BedrockLlmClient("c", decrypt=decrypt, invoke=invoke)
@@ -177,7 +177,7 @@ def test_complete_tool_does_not_retry_on_unrelated_hard_failure():
 
     calls = {"n": 0}
 
-    def invoke(cfg, *, model, system_blocks, messages, tool_config=None):
+    def invoke(cfg, *, model, system_blocks, messages, tool_config=None, max_tokens=None):
         calls["n"] += 1
         raise ClientError({"Error": {"Code": "ThrottlingException", "Message": "rate limited"}}, "Converse")
 
@@ -203,7 +203,7 @@ def test_complete_tool_logs_diagnostics_on_model_error_exception(caplog):
     def decrypt(profile, expected_category):
         return "aws_bedrock", {"model": "amazon.nova-pro-v1:0"}
 
-    def invoke(cfg, *, model, system_blocks, messages, tool_config=None):
+    def invoke(cfg, *, model, system_blocks, messages, tool_config=None, max_tokens=None):
         raise _model_error_exception()
 
     client = BedrockLlmClient("c", decrypt=decrypt, invoke=invoke)
@@ -222,7 +222,7 @@ def test_complete_tool_logs_truncation_hint_when_output_tokens_hit_cap(caplog):
     def decrypt(profile, expected_category):
         return "aws_bedrock", {"model": "amazon.nova-pro-v1:0"}
 
-    def invoke(cfg, *, model, system_blocks, messages, tool_config=None):
+    def invoke(cfg, *, model, system_blocks, messages, tool_config=None, max_tokens=None):
         # graceful stopReason path (no toolUse block) with output_tokens AT the configured cap --
         # the strongest available signal that the response was truncated, not just malformed.
         return {

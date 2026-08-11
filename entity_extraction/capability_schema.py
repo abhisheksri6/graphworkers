@@ -48,6 +48,8 @@ CAPABILITY_SCHEMA: Dict[str, Any] = {
                                                         "description": "Relation-extraction mode: generate (default, LLM open triple-generation) | classify (candidate-pair closed-set classification) | entity_scoped (one call per chunk over the merged entity list, no candidate-pair/same-sentence gate — KG-AC-65) — decoupled from engine (KG-AC-59)"},
         "entity_extraction_config.relation_self_consistency_k": {"type": "integer", "required": "optional",
                                                                   "description": "Self-consistency voting: run the active LLM relation mode k times and keep majority-vote relations (default 1 = off, bounded 1-5, KG-AC-67)"},
+        "entity_extraction_config.llm_max_tokens": {"type": "integer", "required": "optional",
+                                                    "description": "Bedrock Converse maxTokens override for the LLM tool-use call (default: the client's built-in 4096); raise for packs/documents whose extraction output legitimately needs more room (KG-AC-87)"},
     },
     "output_fields": {
         "folder_id": {"type": "string", "always_present": True},

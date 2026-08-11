@@ -55,6 +55,8 @@ class ExtractionConfig:
     relation_strategy: str = "generate"    # KG-AC-59/65 — generate | classify | entity_scoped
     relation_self_consistency_k: int = 1   # KG-AC-67 — self-consistency voting; 1=off (default),
                                             # bounded to [1,5] at point of use (run_pipeline)
+    llm_max_tokens: Optional[int] = None   # KG-AC-87 — Bedrock Converse maxTokens override;
+                                            # None = the client's own default (today's 4096, unchanged)
 
     @classmethod
     def from_dict(cls, d: dict) -> "ExtractionConfig":
@@ -71,6 +73,7 @@ class ExtractionConfig:
             rules_relations_enabled=bool(d.get("rules_relations_enabled", False)),
             relation_strategy=d.get("relation_strategy", "generate"),
             relation_self_consistency_k=int(d.get("relation_self_consistency_k", 1)),
+            llm_max_tokens=int(d["llm_max_tokens"]) if d.get("llm_max_tokens") is not None else None,
         )
 
 

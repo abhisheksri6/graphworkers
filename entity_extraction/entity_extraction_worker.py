@@ -144,7 +144,7 @@ def process_folder(task_id, folder_id, entity_extraction_config, dag_id, run_id,
         config = ExtractionConfig.from_dict(entity_extraction_config)
         pack = load_pack(config.ontology_pack)
         if llm_client is None and config.engine == "llm":
-            llm_client = build_llm_client(config.connection_id)
+            llm_client = build_llm_client(config.connection_id, max_tokens=config.llm_max_tokens)
             if llm_client is None:
                 raise RuntimeError("entity_extraction: engine=llm requires an LLM connection_id")
         if guardrails_screen is None:
@@ -195,7 +195,7 @@ def runtime_entity_extraction_task(task_id, sample, entity_extraction_config):
         config = ExtractionConfig.from_dict(entity_extraction_config)
         llm_client = None
         if config.engine == "llm":
-            llm_client = build_llm_client(config.connection_id)
+            llm_client = build_llm_client(config.connection_id, max_tokens=config.llm_max_tokens)
         payload = runtime.run_preview(
             entity_extraction_config, sample.get("text"),
             spacy_model_path=settings.spacy_model_path, llm_client=llm_client,
