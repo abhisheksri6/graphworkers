@@ -169,16 +169,35 @@ def process_folder(task_id, folder_id, entity_extraction_config, dag_id, run_id,
 
 @celery_app.task(name="entity_extraction_worker.entity_extraction_task")
 def entity_extraction_task(task_id, folder_id, entity_extraction_config, dag_id, run_id):
-    """Extract one folder's chunks -> kg_entities/kg_edges and POST the thin callback."""
-    with get_worker_session() as db:
-        storage = StorageClient(blob_uri=settings.blob_storage_uri, db=db)
-        result = process_folder(
-            task_id, folder_id, entity_extraction_config, dag_id, run_id,
-            storage=storage, db=db, http_post=httpx.post,
-            worker_results_url=settings.worker_results_url,
-            spacy_model_path=settings.spacy_model_path,
-        )
-    return {"task_id": task_id, "status": result["status"], "folder_id": folder_id}
+    """Extract one folder's chunks -> kg_entities/kg_edges and POST the thin callback.
+
+    Bug fix (found live 2026-08-11): the body used to construct ``StorageClient`` OUTSIDE
+    ``process_folder``'s own try/except, so a setup-phase failure (e.g. a misconfigured
+    ``BLOB_STORAGE_URI`` -> ``ValueError``) crashed this Celery task with NO callback ever posted —
+    ``process_folder``'s own "ALWAYS posts a callback" / KG-AC-19 promise doesn't hold for a failure
+    that happens before it's ever entered, and the run is left hanging with nothing telling the
+    backend it failed. Mirrors ``classification_worker.py``'s ``classification_task``, which already
+    wraps its entire body (including its own ``StorageClient`` construction) in one try/except.
+    """
+    try:
+        with get_worker_session() as db:
+            storage = StorageClient(blob_uri=settings.blob_storage_uri, db=db)
+            result = process_folder(
+                task_id, folder_id, entity_extraction_config, dag_id, run_id,
+                storage=storage, db=db, http_post=httpx.post,
+                worker_results_url=settings.worker_results_url,
+                spacy_model_path=settings.spacy_model_path,
+            )
+        return {"task_id": task_id, "status": result["status"], "folder_id": folder_id}
+    except Exception as exc:  # noqa: BLE001 — worker boundary: a setup-phase failure (before
+        # process_folder even starts) must still post a callback, same as process_folder's own
+        # per-folder-isolation guarantee (KG-AC-19) applies to failures inside it.
+        log_event(logger, logging.ERROR, "entity_extraction.setup_failed",
+                  folder_id=folder_id, action="fail", exc=exc)
+        payload = cb.build_callback(task_id, folder_id, dag_id, run_id,
+                                    status="failed", summary=None, usage=[], error_message=str(exc))
+        _post_callback(httpx.post, settings.worker_results_url, payload)
+        return {"task_id": task_id, "status": "failed", "folder_id": folder_id}
 
 
 @celery_app.task(name="entity_extraction_worker.runtime_entity_extraction_task")
