@@ -1,11 +1,14 @@
-"""Ontology pack schema + loader (ADR-0008). Pure — json + validation only, no spaCy/DB/network.
+"""Ontology pack schema + loader (ADR-0008, amended v13). Pure — json + validation only, no
+spaCy/DB/network.
 
 A pack is a versioned, **domain-agnostic** JSON: entity types (each with a `parent` hierarchy validated
-as a DAG, per-engine mapping via `spacy_labels`, `guidance` for the LLM prompt, and an OPTIONAL inert
-`iri`) + relations (with `domain`/`range` typing). The runtime vocabulary is CLOSED — `is_known_type`
-gates what may be written; unknown types are dropped + counted by the strategies (KG-AC-14). The
-`parent` hierarchy drives canonicalization's type reconciliation (KG-AC-23). `generic`/`fibo_core` are
-shipped *samples*; a customer authors a custom pack for any domain.
+as a DAG, per-engine mapping via `spacy_labels`, `guidance` for the LLM prompt, an OPTIONAL `iri`, and
+an OPTIONAL `abstract` flag — KG-AC-72, default false) + relations (with `domain`/`range` typing, an
+OPTIONAL `iri` — KG-AC-85) + an OPTIONAL `datatype_properties` attribute vocabulary (KG-AC-69). The
+runtime vocabulary is CLOSED — `is_known_type` gates what may be written; unknown types are dropped +
+counted by the strategies (KG-AC-14). The `parent` hierarchy drives canonicalization's type
+reconciliation (KG-AC-23). `generic`/`fibo_core` are shipped *samples*; a customer authors a custom
+pack for any domain.
 """
 from __future__ import annotations
 
@@ -22,6 +25,11 @@ _PACK_DIR = Path(__file__).resolve().parent
 # EntityRuler layer (J3), not here; this is schema validation only.
 _KNOWN_CHECKSUMS = frozenset({"lei", "isin"})
 
+# KG-AC-69: the closed set of scalar kinds a datatype_property's `range` may declare. Drives
+# core.py's per-kind normalizer (P6) — an undeclared kind fails loud at load, same posture as an
+# unknown regex_pattern checksum above.
+_KNOWN_RANGE_KINDS = frozenset({"string", "number", "date", "identifier"})
+
 
 class OntologyError(ValueError):
     """Malformed pack, unknown pack, or an invalid hierarchy — always fail loud (KG-AC-14)."""
@@ -34,6 +42,7 @@ class EntityType:
     spacy_labels: List[str]
     guidance: str
     iri: Optional[str]
+    abstract: bool = False  # KG-AC-72 (v13): only an abstract type may be written span-less
 
 
 @dataclass
@@ -42,6 +51,19 @@ class Relation:
     domain: List[str]
     range: List[str]
     guidance: str
+    iri: Optional[str] = None  # KG-AC-85 (v13): retained now — previously dropped at parse time
+
+
+@dataclass
+class DatatypeProperty:
+    """KG-AC-69 (v13): a pack-declared attribute — ``domain`` is one declared entity type,
+    ``range`` is a scalar kind (see ``_KNOWN_RANGE_KINDS``). Consumed by the tool-schema builder
+    (P6) to enum-constrain ``facts[].property`` and by core.py's per-kind normalizer."""
+    property: str
+    domain: str
+    range: str
+    guidance: str
+    iri: Optional[str] = None
 
 
 @dataclass
@@ -70,7 +92,8 @@ class Pack:
     def __init__(self, name: str, version: str, description: str,
                  entity_types: Sequence[EntityType], relations: Sequence[Relation],
                  regex_patterns: Sequence[RegexPattern] = (),
-                 dep_patterns: Sequence[DepPattern] = ()):
+                 dep_patterns: Sequence[DepPattern] = (),
+                 datatype_properties: Sequence[DatatypeProperty] = ()):
         self.name = name
         self.version = version
         self.description = description
@@ -78,6 +101,9 @@ class Pack:
         self.relations: Dict[str, Relation] = {r.type: r for r in relations}
         self.regex_patterns: List[RegexPattern] = list(regex_patterns)
         self.dep_patterns: List[DepPattern] = list(dep_patterns)
+        self.datatype_properties: Dict[str, DatatypeProperty] = {
+            dp.property: dp for dp in datatype_properties
+        }
         self._declaration_order = [et.type for et in entity_types]
         self._spacy_map: Dict[str, str] = {}
         for et in entity_types:
@@ -103,6 +129,20 @@ class Pack:
                     raise OntologyError(f"relation '{r.type}' references undeclared type '{t}'")
         self._validate_regex_patterns()
         self._validate_dep_patterns()
+        self._validate_datatype_properties()
+
+    def _validate_datatype_properties(self) -> None:
+        """KG-AC-69: every datatype_properties entry's domain is a declared entity type and its
+        range is a known scalar kind — fail loud naming the pack + property (ADR-0008 amended)."""
+        for dp in self.datatype_properties.values():
+            if dp.domain not in self.entity_types:
+                raise OntologyError(
+                    f"pack '{self.name}': datatype_properties entry '{dp.property}' "
+                    f"references undeclared domain type '{dp.domain}'")
+            if dp.range not in _KNOWN_RANGE_KINDS:
+                raise OntologyError(
+                    f"pack '{self.name}': datatype_properties entry '{dp.property}' "
+                    f"names an unknown range kind '{dp.range}' (known: {sorted(_KNOWN_RANGE_KINDS)})")
 
     def _validate_regex_patterns(self) -> None:
         """KG-AC-54: every regex_pattern's type is declared, its regex compiles, and any
@@ -225,12 +265,18 @@ def load_pack(name_or_path: str) -> Pack:
         data = json.loads(path.read_text(encoding="utf-8"))
         ets = [
             EntityType(type=e["type"], parent=e.get("parent"), spacy_labels=e.get("spacy_labels", []),
-                       guidance=e.get("guidance", ""), iri=e.get("iri"))
+                       guidance=e.get("guidance", ""), iri=e.get("iri"), abstract=e.get("abstract", False))
             for e in data["entity_types"]
         ]
         rels = [
-            Relation(type=r["type"], domain=r["domain"], range=r["range"], guidance=r.get("guidance", ""))
+            Relation(type=r["type"], domain=r["domain"], range=r["range"], guidance=r.get("guidance", ""),
+                     iri=r.get("iri"))
             for r in data.get("relations", [])
+        ]
+        datatype_properties = [
+            DatatypeProperty(property=p["property"], domain=p["domain"], range=p["range"],
+                             guidance=p.get("guidance", ""), iri=p.get("iri"))
+            for p in data.get("datatype_properties", [])
         ]
         regex_patterns = [
             RegexPattern(entity_type=p["entity_type"], pattern=p["pattern"], checksum=p.get("checksum"))
@@ -245,6 +291,7 @@ def load_pack(name_or_path: str) -> Pack:
             name=data["name"], version=str(data.get("version", "")), description=data.get("description", ""),
             entity_types=ets, relations=rels,
             regex_patterns=regex_patterns, dep_patterns=dep_patterns,
+            datatype_properties=datatype_properties,
         )
     except KeyError as exc:
         raise OntologyError(f"malformed pack '{name_or_path}': missing key {exc}") from exc

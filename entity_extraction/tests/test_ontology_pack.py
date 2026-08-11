@@ -12,6 +12,33 @@ from ontologies import (
 )
 
 
+# ---- relation `iri` retention (P1, spec v13, KG-AC-85) --------------------
+@pytest.mark.ac("KG-AC-85")
+def test_relation_iri_survives_loading():
+    # today Relation is (type, domain, range, guidance) -- iri is silently discarded at parse time.
+    p = Pack(name="x", version="1", description="",
+             entity_types=[EntityType("Investor", None, [], "", None),
+                           EntityType("InvestmentRelationship", None, [], "", None)],
+             relations=[Relation("hasInvestor", ["InvestmentRelationship"], ["Investor"], "",
+                                 iri="https://contextbuilder.ai/ontology/investment#hasInvestor")])
+    assert p.relations["hasInvestor"].iri == "https://contextbuilder.ai/ontology/investment#hasInvestor"
+
+
+@pytest.mark.ac("KG-AC-85")
+def test_relation_iri_optional_pack_unaffected():
+    p = Pack(name="x", version="1", description="",
+             entity_types=[EntityType("A", None, [], "", None), EntityType("B", None, [], "", None)],
+             relations=[Relation("rel", ["A"], ["B"], "")])
+    assert p.relations["rel"].iri is None
+
+
+@pytest.mark.ac("KG-AC-85")
+def test_investment_fibo_relations_carry_iri():
+    p = load_pack("investment_fibo")
+    r = p.relations["hasInvestor"]
+    assert r.iri == "https://contextbuilder.ai/ontology/investment#hasInvestor"
+
+
 # ---- pack loading + validation (KG-AC-14) --------------------------------
 @pytest.mark.ac("KG-AC-14")
 def test_shipped_packs_load_and_validate():
