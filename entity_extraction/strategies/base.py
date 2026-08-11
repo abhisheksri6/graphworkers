@@ -252,6 +252,13 @@ def run_pipeline(chunks: List[Chunk], config: ExtractionConfig, pack, *, folder_
                           for ch in chunks}
         pairs = enumerate_candidate_pairs(merged, sentence_spans, pack)
         raw_relations = raw_relations + LlmClassifyStrategy(llm_client=llm_client).classify(pairs, chunk_text_by_id)
+    elif config.relation_strategy == "entity_scoped":
+        # KG-AC-65 (evolve v12): one call per chunk over the FINAL merged entity set — no
+        # candidate-pair enumeration, no sentence-boundary nlp needed at all (unlike classify).
+        # Lazy RELATIVE import, same safety reasoning as llm_classify's import above.
+        from .llm_entity_scoped import LlmEntityScopedStrategy
+        raw_relations = raw_relations + LlmEntityScopedStrategy(llm_client=llm_client).extract(
+            merged, chunk_text_by_id, pack)
 
     relations, ungrounded = validate_relations(raw_relations, pack, chunk_text_by_id)
     edge_rows = build_edge_records(folder_id, relations, entity_uid_key_map(ent_rows))

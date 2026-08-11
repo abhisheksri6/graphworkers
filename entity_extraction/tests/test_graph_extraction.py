@@ -237,6 +237,23 @@ def test_classify_mode_discards_generate_relations_from_llm_engine():
     assert relations == []  # generate-mode relations from that SAME call are discarded
 
 
+@pytest.mark.ac("KG-AC-65")
+def test_entity_scoped_mode_also_discards_generate_relations_from_llm_engine():
+    # KG-AC-65 (evolve v12): entity_scoped is a THIRD generate-XOR value. This is a regression
+    # guard, not a code change -- `if config.relation_strategy == "generate":` already excludes
+    # any other value, entity_scoped included, with no edit needed (confirmed at N3 grounding).
+    # entity_scoped's OWN relations come from strategies/llm_entity_scoped.py via run_pipeline
+    # (needs the post-merge entity set), not here.
+    client = _FakeLlmClient([_GRAPH_RESPONSE])
+    cfg = ExtractionConfig(engine="llm", ontology_pack="fibo_core", relation_strategy="entity_scoped")
+    candidates, relations = run_graph_extraction(
+        [Chunk("c1", "Acme Corp issues Acme 5% 2030.")], cfg, FIBO, llm_client=client,
+    )
+    assert client.calls == 1
+    assert {c.entity_type for c in candidates} == {"Organization", "Bond"}
+    assert relations == []
+
+
 @pytest.mark.ac("KG-AC-43")
 def test_generate_mode_still_returns_llm_relations_regression_guard():
     # explicit relation_strategy="generate" (the pre-v10 default) must behave EXACTLY as before --
