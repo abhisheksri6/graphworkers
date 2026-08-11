@@ -147,15 +147,19 @@ def run_graph_extraction(chunks: List[Chunk], config: ExtractionConfig, pack, *,
                          spacy_model_path=None, spacy_nlp=None,
                          llm_client=None,
                          unresolved_reference_sink: Optional[List[int]] = None,
+                         unlocatable_entity_sink: Optional[List[int]] = None,
                          ) -> Tuple[List[Candidate], List[Relation]]:
     """KG-AC-43/44: the active entity layer(s) + relations for this config. ``engine=spacy`` is
     entity-only (zero relations, KG-AC-44). ``engine=llm`` emits entities AND relations from ONE
     call per chunk via ``LlmGraphStrategy`` (KG-AC-43). ``spacy_nlp`` is a pass-through test seam
     mirroring ``SpacyNerStrategy``'s own ``nlp=`` param. ``unresolved_reference_sink`` (KG-AC-71,
     v13): an optional mutable out-list — when provided and ``generate`` mode is active, the
-    strategy's own ``unresolved_reference_count`` is appended to it. A plain out-parameter (not a
-    3rd return value) so this function's existing 2-tuple return shape — depended on by several
-    call sites, including test harnesses that unpack it directly — never changes."""
+    strategy's own ``unresolved_reference_count`` is appended to it. ``unlocatable_entity_sink``
+    (KG-AC-72, v13): same out-list mechanism, appended whenever ``engine=llm`` regardless of
+    relation_strategy (entities from THIS call are always used, unlike relations under
+    classify/entity_scoped). Both are plain out-parameters (not extra return values) so this
+    function's existing 2-tuple return shape — depended on by several call sites, including test
+    harnesses that unpack it directly — never changes."""
     from .llm_graph import LlmGraphStrategy
     from .rules_entities import RulesEntitiesStrategy
     from .rules_relations import RulesRelationsStrategy
@@ -180,6 +184,8 @@ def run_graph_extraction(chunks: List[Chunk], config: ExtractionConfig, pack, *,
     elif config.engine == "llm":
         graph = LlmGraphStrategy(llm_client=llm_client)
         candidates += graph.extract(chunks, config, pack)
+        if unlocatable_entity_sink is not None:  # KG-AC-72: entities from THIS call are always
+            unlocatable_entity_sink.append(graph.unlocatable_entity_count)  # used, any relation_strategy
         if config.relation_strategy == "generate":  # KG-AC-59: generate XOR classify — under
             relations = graph.relations             # classify, this SAME call's relations are
             # discarded; entities from it are still used. Classify's own relations come from
@@ -242,11 +248,17 @@ def run_pipeline(chunks: List[Chunk], config: ExtractionConfig, pack, *, folder_
     # mutable list (not a running int) so run_graph_extraction's optional out-parameter and the
     # closures below can all append to the SAME accumulator without a `nonlocal` declaration.
     unresolved_counts: List[int] = []
+    # KG-AC-72 (v13): unlike unresolved_counts, this is captured ONLY from run_graph_extraction's
+    # own call — entities always come from run 1 alone (self-consistency repeats' entities are
+    # discarded, per the structural finding above), so counting a repeat run's unlocatable drops
+    # would tally something that never affected the written graph.
+    unlocatable_entity_counts: List[int] = []
 
     candidates, raw_relations = run_graph_extraction(
         chunks, config, pack, spacy_model_path=spacy_model_path,
         spacy_nlp=shared_nlp, llm_client=llm_client,
         unresolved_reference_sink=unresolved_counts,
+        unlocatable_entity_sink=unlocatable_entity_counts,
     )
     if config.coreference_enabled:
         candidates = filter_bare_pronouns(candidates)
@@ -349,6 +361,7 @@ def run_pipeline(chunks: List[Chunk], config: ExtractionConfig, pack, *, folder_
                             unmapped, config.promote_top_n, ungrounded_relation_count=ungrounded,
                             self_consistency_votes=self_consistency_votes,
                             chunk_metadata_missing_count=chunk_metadata_missing_count,
-                            unresolved_reference_count=sum(unresolved_counts))
+                            unresolved_reference_count=sum(unresolved_counts),
+                            unlocatable_entity_count=sum(unlocatable_entity_counts))
     usage = list(getattr(llm_client, "usage", []) or [])
     return ent_rows, edge_rows, summary, usage, guardrails_blocked

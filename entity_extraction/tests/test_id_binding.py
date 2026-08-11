@@ -90,11 +90,15 @@ def test_llm_graph_index_is_raw_response_position_not_post_filter_position():
         ],
     }
     strat = LlmGraphStrategy(llm_client=_FakeLlmClient(response))
-    strat.extract([Chunk("c1", "text")], ExtractionConfig(engine="llm"), FIBO)
+    # chunk text must literally contain both surfaces so KG-AC-72's unlocatable-span drop doesn't
+    # remove them before this test's own id-position assertion is ever reached.
+    strat.extract([Chunk("c1", "Acme 5% 2030 has a rating held by Jane Roe.")],
+                  ExtractionConfig(engine="llm"), FIBO)
     assert len(strat.relations) == 1
     assert strat.relations[0].src_surface == "Acme 5% 2030"
     assert strat.relations[0].dst_surface == "Jane Roe"
     assert strat.unresolved_reference_count == 0
+    assert strat.unlocatable_entity_count == 0
 
 
 @pytest.mark.ac("KG-AC-71")

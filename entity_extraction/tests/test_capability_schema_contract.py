@@ -49,6 +49,7 @@ def test_state_scalar_outputs_present():
         "entity_count", "edge_count", "distinct_types",
         "ontology_pack", "ontology_version", "unmapped_type_count", "ungrounded_relation_count",
         "self_consistency_votes", "chunk_metadata_missing_count", "unresolved_reference_count",
+        "unlocatable_entity_count",
     ):
         assert out[field]["always_present"] is True, field
     # top_entities is bounded top-N and may be empty -> not always_present

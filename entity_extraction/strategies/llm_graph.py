@@ -156,6 +156,7 @@ class LlmGraphStrategy(EntityStrategy):
         self._client = llm_client
         self.relations: List[Relation] = []
         self.unresolved_reference_count = 0  # KG-AC-71 (v13) — src_id/dst_id absent from entities[]
+        self.unlocatable_entity_count = 0  # KG-AC-72 (v13) — non-abstract entity, span not found
 
     def extract(self, chunks: List[Chunk], config: ExtractionConfig, pack) -> List[Candidate]:
         if self._client is None:
@@ -173,20 +174,39 @@ class LlmGraphStrategy(EntityStrategy):
             # KG-AC-71: keyed by RAW response position (not post-filter list position) — an invalid/
             # skipped entity item leaves no entry, so a relation referencing that position is
             # correctly unresolved, matching what the model was actually told ("0-based position in
-            # the entities array" means the array it emitted, not our filtered view of it).
+            # the entities array" means the array it emitted, not our filtered view of it). Also
+            # true for KG-AC-72's unlocatable-span drop below — same "not in this response's own
+            # entities[]" reasoning applies to a position that was dropped for lacking a span.
             by_raw_index: Dict[int, Candidate] = {}
             for raw_idx, item in enumerate(data.get("entities", []) or []):
                 etype, surface = item.get("type"), item.get("surface")
                 if not etype or not surface:
                     continue
-                occ = seen_surface.get(surface, 0)
-                seen_surface[surface] = occ + 1
-                span = find_span(ch.text, surface, occ)
-                cand = Candidate(
-                    surface_form=surface, entity_type=etype, source_chunk_id=ch.chunk_id, layer="llm",
-                    span_start=span[0] if span else None, span_end=span[1] if span else None,
-                    confidence=float(item.get("confidence", 0.7)),
-                )
+                # KG-AC-72: an ABSTRACT pack type (a concept the document never writes literally —
+                # an overall relationship, a terms grouping) is accepted without ever searching for
+                # a span; a non-abstract type keeps the existing locate-or-drop rule. Unknown types
+                # (not in this pack at all) are treated as non-abstract here — the closed-vocab
+                # filter downstream is where an out-of-pack type gets dropped, not here.
+                entity_type_decl = pack.entity_types.get(etype)
+                is_abstract = bool(entity_type_decl and entity_type_decl.abstract)
+                if is_abstract:
+                    cand = Candidate(
+                        surface_form=surface, entity_type=etype, source_chunk_id=ch.chunk_id, layer="llm",
+                        span_start=None, span_end=None, is_abstract=True,
+                        confidence=float(item.get("confidence", 0.7)),
+                    )
+                else:
+                    occ = seen_surface.get(surface, 0)
+                    seen_surface[surface] = occ + 1
+                    span = find_span(ch.text, surface, occ)
+                    if span is None:  # KG-AC-72: non-abstract + unlocatable -> dropped, not written
+                        self.unlocatable_entity_count += 1
+                        continue
+                    cand = Candidate(
+                        surface_form=surface, entity_type=etype, source_chunk_id=ch.chunk_id, layer="llm",
+                        span_start=span[0], span_end=span[1],
+                        confidence=float(item.get("confidence", 0.7)),
+                    )
                 entities.append(cand)
                 by_raw_index[raw_idx] = cand
             relations_raw = data.get("relations")

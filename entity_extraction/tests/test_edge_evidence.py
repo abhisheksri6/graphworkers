@@ -65,9 +65,13 @@ def test_relation_without_evidence_is_dropped():
         ],
     }
     strat = LlmGraphStrategy(llm_client=_FakeLlmClient(response))
-    strat.extract([Chunk("c1", "text")], ExtractionConfig(engine="llm"), FIBO)
+    # chunk text must literally contain every surface so all 3 entities locate (KG-AC-72) --
+    # isolating this test to the missing-evidence drop, not an unrelated unlocatable-span drop.
+    strat.extract([Chunk("c1", "Acme Corp issues Acme 5% 2030. Acme Corp employs Jane Roe.")],
+                 ExtractionConfig(engine="llm"), FIBO)
     # the 'issues' relation had no 'evidence' key -> dropped; 'employs' had one -> kept
     assert len(strat.relations) == 1
+    assert strat.unlocatable_entity_count == 0  # isolated: not an unlocatable-span drop
     assert strat.relations[0].relation_type == "employs"
 
 

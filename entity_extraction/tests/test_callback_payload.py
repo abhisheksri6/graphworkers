@@ -25,6 +25,7 @@ _SUMMARY = {
     "self_consistency_votes": 1,
     "chunk_metadata_missing_count": 0,
     "unresolved_reference_count": 0,
+    "unlocatable_entity_count": 0,
 }
 _USAGE = [{"charge_category": "llm", "model": "amazon.nova-pro-v1:0",
            "input_tokens": 100, "output_tokens": 50, "connection_id": "conn-1"}]
@@ -59,7 +60,8 @@ def test_folders_carry_state_scalars_for_m1_merge():
     for field in ("entity_count", "edge_count", "distinct_types", "top_entities",
                   "ontology_pack", "ontology_version", "unmapped_type_count",
                   "ungrounded_relation_count", "self_consistency_votes",
-                  "chunk_metadata_missing_count", "unresolved_reference_count"):
+                  "chunk_metadata_missing_count", "unresolved_reference_count",
+                  "unlocatable_entity_count"):
         assert field in state, field
     assert state["entity_count"] == 3
 

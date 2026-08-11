@@ -17,6 +17,7 @@
   "self_consistency_votes": 1,
   "chunk_metadata_missing_count": 0,
   "unresolved_reference_count": 0,
+  "unlocatable_entity_count": 0,
   "usage": [
     {"charge_category": "llm", "model": "amazon.nova-pro-v1:0", "input_tokens": 100, "output_tokens": 50, "connection_id": "conn-1"}
   ],
@@ -35,7 +36,8 @@
       "ungrounded_relation_count": 0,
       "self_consistency_votes": 1,
       "chunk_metadata_missing_count": 0,
-      "unresolved_reference_count": 0
+      "unresolved_reference_count": 0,
+      "unlocatable_entity_count": 0
     }
   ]
 }

@@ -37,6 +37,8 @@ class Candidate:
     span_end: Optional[int] = None
     confidence: float = 1.0
     occurrence_idx: int = 0
+    is_abstract: bool = False  # KG-AC-72 (v13) — a pack-declared abstract type, never span-located;
+    # surface_form holds the model's synthesised name. Only LlmGraphStrategy ever sets this True.
 
 
 @dataclass
@@ -170,6 +172,7 @@ def build_entity_records(
             "source_chunk_id": c.source_chunk_id,
             "source_doc_id": doc_id,
             "page": page,
+            "is_abstract": c.is_abstract,
             "span_start": c.span_start,
             "span_end": c.span_end,
             "occurrence_idx": c.occurrence_idx,
@@ -312,7 +315,7 @@ def build_summary(
     entity_rows: List[Dict], edge_rows: List[Dict], ontology_pack: str, ontology_version: str,
     unmapped_type_count: int, promote_top_n: int = 10, ungrounded_relation_count: int = 0,
     self_consistency_votes: int = 1, chunk_metadata_missing_count: int = 0,
-    unresolved_reference_count: int = 0,
+    unresolved_reference_count: int = 0, unlocatable_entity_count: int = 0,
 ) -> Dict:
     """The KG-AC-9 state-plane scalar summary the callback promotes (no bulk rows on state).
     *Amended v11 — `linked_count` (gazetteer-link count) is dropped with that capability.*
@@ -324,7 +327,10 @@ def build_summary(
     lacked a doc_id or page, so document/page provenance recorded null rather than a fabricated
     value. `unresolved_reference_count` (KG-AC-71) added: relations whose src_id/dst_id did not
     resolve to an entity in the same LLM call's own response, across every LLM relation call the
-    run made (run 1 and every self-consistency repeat).*"""
+    run made (run 1 and every self-consistency repeat). `unlocatable_entity_count` (KG-AC-72)
+    added: non-abstract entities the model returned whose surface could not be located in the
+    source chunk, dropped rather than written with a null span — this is a NEW v13 behaviour, not
+    a preservation of an existing one (see this task's Done writeup for the correction).*"""
     distinct_types = len({r["entity_type"] for r in entity_rows})
     return {
         "entity_count": len(entity_rows),
@@ -338,6 +344,7 @@ def build_summary(
         "self_consistency_votes": self_consistency_votes,
         "chunk_metadata_missing_count": chunk_metadata_missing_count,
         "unresolved_reference_count": unresolved_reference_count,
+        "unlocatable_entity_count": unlocatable_entity_count,
     }
 
 

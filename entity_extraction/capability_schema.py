@@ -71,6 +71,8 @@ CAPABILITY_SCHEMA: Dict[str, Any] = {
                                          "description": "Chunks whose chunk_metadata lacked a doc_id or page, so document/page provenance recorded null rather than a fabricated value (KG-AC-73)"},
         "unresolved_reference_count": {"type": "integer", "always_present": True,
                                        "description": "Relations whose src_id/dst_id did not resolve to an entity in the same LLM call's own response (KG-AC-71)"},
+        "unlocatable_entity_count": {"type": "integer", "always_present": True,
+                                     "description": "Non-abstract entities the model returned whose surface could not be located in the source chunk, dropped rather than written (KG-AC-72)"},
     },
     "artifact_inputs": {
         "chunks": {"required": "always",
