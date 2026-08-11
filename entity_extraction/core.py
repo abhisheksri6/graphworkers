@@ -267,10 +267,12 @@ def promote_top_entities(entity_rows: List[Dict], promote_top_n: int = 10, hard_
 
 def build_summary(
     entity_rows: List[Dict], edge_rows: List[Dict], ontology_pack: str, ontology_version: str,
-    unmapped_type_count: int, promote_top_n: int = 10,
+    unmapped_type_count: int, promote_top_n: int = 10, ungrounded_relation_count: int = 0,
 ) -> Dict:
     """The KG-AC-9 state-plane scalar summary the callback promotes (no bulk rows on state).
-    *Amended v11 — `linked_count` (gazetteer-link count) is dropped with that capability.*"""
+    *Amended v11 — `linked_count` (gazetteer-link count) is dropped with that capability.*
+    *Amended v12 — `ungrounded_relation_count` (KG-AC-64) added: LLM relations dropped because
+    their evidence was not found verbatim in the source chunk.*"""
     distinct_types = len({r["entity_type"] for r in entity_rows})
     return {
         "entity_count": len(entity_rows),
@@ -280,6 +282,7 @@ def build_summary(
         "ontology_pack": ontology_pack,
         "ontology_version": ontology_version,
         "unmapped_type_count": unmapped_type_count,
+        "ungrounded_relation_count": ungrounded_relation_count,
     }
 
 

@@ -13,6 +13,7 @@
   "ontology_pack": "fibo_core",
   "ontology_version": "1.0",
   "unmapped_type_count": 1,
+  "ungrounded_relation_count": 0,
   "usage": [
     {"charge_category": "llm", "model": "amazon.nova-pro-v1:0", "input_tokens": 100, "output_tokens": 50, "connection_id": "conn-1"}
   ],
@@ -27,7 +28,8 @@
       ],
       "ontology_pack": "fibo_core",
       "ontology_version": "1.0",
-      "unmapped_type_count": 1
+      "unmapped_type_count": 1,
+      "ungrounded_relation_count": 0
     }
   ]
 }

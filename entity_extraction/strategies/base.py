@@ -22,6 +22,7 @@ pure filters below are unit-testable with fakes today.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any, List, Optional, Tuple
 
@@ -96,11 +97,43 @@ def filter_closed_vocab(candidates: List[Candidate], config: ExtractionConfig, p
     return kept, unmapped
 
 
-def validate_relations(relations: List[Relation], pack) -> List[Relation]:
-    """KG-AC-43 (carries KG-AC-16's surviving guarantee): keep only relations whose type + src/dst
-    types satisfy the pack's domain/range (a subtype of a declared domain/range type is accepted);
-    illegal pairings dropped. Deterministic."""
-    return [r for r in relations if pack.relation_allowed(r.relation_type, r.src_type, r.dst_type)]
+_WS_RE = re.compile(r"\s+")
+
+
+def _normalize_ws(s: Optional[str]) -> str:
+    return _WS_RE.sub(" ", s or "").strip()
+
+
+def _evidence_grounded(evidence: Optional[str], chunk_text: str) -> bool:
+    """KG-AC-64 (evolve v12): the evidence must occur VERBATIM (whitespace-normalised comparison;
+    case-sensitive otherwise) in the source chunk text. Missing evidence never grounds."""
+    if not evidence:
+        return False
+    return _normalize_ws(evidence) in _normalize_ws(chunk_text)
+
+
+def validate_relations(
+    relations: List[Relation], pack, chunk_text_by_id: dict,
+) -> Tuple[List[Relation], int]:
+    """KG-AC-43 (carries KG-AC-16's surviving guarantee) + KG-AC-64 (evolve v12 — evidence
+    grounding): keep only relations whose type + src/dst types satisfy the pack's domain/range (a
+    subtype of a declared domain/range type is accepted; illegal pairings dropped, uncounted) AND —
+    for LLM-sourced relations only (``extractor != 'rules'``) — whose evidence occurs verbatim in
+    the source chunk (KG-AC-64; deterministic-layer relations are exempt, their evidence is the
+    matched sentence by construction). Ungrounded relations are dropped AND counted. Deterministic.
+    Returns (kept, ungrounded_count)."""
+    kept: List[Relation] = []
+    ungrounded = 0
+    for r in relations:
+        if not pack.relation_allowed(r.relation_type, r.src_type, r.dst_type):
+            continue
+        if r.extractor != "rules":
+            chunk_text = chunk_text_by_id.get(r.source_chunk_id, "")
+            if not _evidence_grounded(r.evidence_text, chunk_text):
+                ungrounded += 1
+                continue
+        kept.append(r)
+    return kept, ungrounded
 
 
 # -- orchestration (impure — instantiates the injected strategies) ---------
@@ -201,6 +234,10 @@ def run_pipeline(chunks: List[Chunk], config: ExtractionConfig, pack, *, folder_
     merged = merge_candidates(kept)
     ent_rows = build_entity_records(folder_id, merged, config.ontology_pack, pack.version, model_id=model_id)
 
+    # KG-AC-64 (evolve v12): every LLM relation mode needs chunk text for evidence grounding, not
+    # just classify's candidate-pair prompt — built once, unconditionally.
+    chunk_text_by_id = {ch.chunk_id: ch.text for ch in chunks}
+
     if config.relation_strategy == "classify":
         # KG-AC-60/61: candidate pairs are enumerated over the FINAL merged (post span-overlap-
         # resolution) entity set, never the raw pre-merge candidates — otherwise overlapping
@@ -214,14 +251,13 @@ def run_pipeline(chunks: List[Chunk], config: ExtractionConfig, pack, *, folder_
         sentence_spans = {ch.chunk_id: [(s.start_char, s.end_char) for s in shared_nlp(ch.text).sents]
                           for ch in chunks}
         pairs = enumerate_candidate_pairs(merged, sentence_spans, pack)
-        chunk_text_by_id = {ch.chunk_id: ch.text for ch in chunks}
         raw_relations = raw_relations + LlmClassifyStrategy(llm_client=llm_client).classify(pairs, chunk_text_by_id)
 
-    relations = validate_relations(raw_relations, pack)
+    relations, ungrounded = validate_relations(raw_relations, pack, chunk_text_by_id)
     edge_rows = build_edge_records(folder_id, relations, entity_uid_key_map(ent_rows))
     edge_rows = merge_edge_records(edge_rows)  # KG-AC-56 (evolve v8) — union+dedup multi-source relations
 
     summary = build_summary(ent_rows, edge_rows, config.ontology_pack, pack.version,
-                            unmapped, config.promote_top_n)
+                            unmapped, config.promote_top_n, ungrounded_relation_count=ungrounded)
     usage = list(getattr(llm_client, "usage", []) or [])
     return ent_rows, edge_rows, summary, usage, guardrails_blocked

@@ -3,8 +3,9 @@ relations from ONE schema-constrained call per chunk (no separate relation promp
 is validated against the pack's domain/range and dangling endpoints (no matching extracted entity)
 are dropped; a missing/malformed `relations` key degrades to entities-only, never a crash. The
 `spacy` engine remains entity-only — zero relations, no relation config consulted. Supersedes
-withdrawn KG-AC-16 (the `test_illegal_pairings_dropped_by_validate` case is carried forward here,
-re-tagged, since `validate_relations` itself is unchanged)."""
+the retired relation_engine split (the `test_illegal_pairings_dropped_by_validate` case is carried
+forward here, re-tagged; `validate_relations` gained a chunk-text param + evidence grounding at
+evolve v12, KG-AC-64 — see test_evidence_grounding.py for that behaviour)."""
 import pytest
 import spacy
 from spacy.tokens import Doc
@@ -73,19 +74,26 @@ def test_llm_engine_one_call_returns_entities_and_relations():
 
 @pytest.mark.ac("KG-AC-43")
 def test_illegal_relation_pairing_dropped_by_validate():
+    # both relations carry real, grounded evidence so domain/range is the ONLY differentiator here
+    # -- KG-AC-64's evidence-grounding gate is exercised separately in test_evidence_grounding.py.
+    chunk_text = "Jane Roe issues Acme 5% 2030 too. Acme Corp issues Acme 5% 2030."
     rels = [
-        Relation("issues", "Jane Roe", "Person", "Acme 5% 2030", "Bond", "c1"),          # illegal -> drop
-        Relation("issues", "Acme Corp", "Organization", "Acme 5% 2030", "Bond", "c1"),   # legal -> keep
+        Relation("issues", "Jane Roe", "Person", "Acme 5% 2030", "Bond", "c1",
+                 evidence_text="Jane Roe issues Acme 5% 2030 too."),          # illegal -> drop
+        Relation("issues", "Acme Corp", "Organization", "Acme 5% 2030", "Bond", "c1",
+                 evidence_text="Acme Corp issues Acme 5% 2030."),             # legal -> keep
     ]
-    kept = validate_relations(rels, FIBO)
+    kept, ungrounded = validate_relations(rels, FIBO, {"c1": chunk_text})
     assert len(kept) == 1
     assert kept[0].src_type == "Organization"
+    assert ungrounded == 0  # the illegal one was dropped for domain/range, not grounding
 
 
 @pytest.mark.ac("KG-AC-43")
 def test_dangling_endpoint_relation_dropped_at_edge_build():
     # the relation names a dst entity ("Ghost Corp") that was never extracted -> dropped, not written.
-    # 'evidence' is present so the drop is isolated to the dangling-endpoint reason, not KG-AC-46.
+    # 'evidence' is present AND verbatim in the chunk text so the drop is isolated to the
+    # dangling-endpoint reason, not KG-AC-46 (missing evidence) or KG-AC-64 (ungrounded evidence).
     response = {
         "entities": [{"type": "Organization", "surface": "Acme Corp", "confidence": 0.9}],
         "relations": [{"type": "issues", "src": "Acme Corp", "src_type": "Organization",
@@ -95,10 +103,11 @@ def test_dangling_endpoint_relation_dropped_at_edge_build():
     client = _FakeLlmClient([response])
     cfg = ExtractionConfig(engine="llm", ontology_pack="fibo_core")
     ent_rows, edge_rows, summary, usage, blocked = run_pipeline(
-        [Chunk("c1", "Acme Corp issues something.")], cfg, FIBO, folder_id="f1", llm_client=client,
+        [Chunk("c1", "Acme Corp issues something to Ghost Corp.")], cfg, FIBO, folder_id="f1", llm_client=client,
     )
     assert len(ent_rows) == 1
     assert edge_rows == []  # dangling dst -> dropped
+    assert summary["ungrounded_relation_count"] == 0  # isolated: not a grounding drop
 
 
 @pytest.mark.ac("KG-AC-43")

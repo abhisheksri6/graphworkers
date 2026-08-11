@@ -15,9 +15,10 @@ from typing import Any, Dict, List, Optional
 
 # The KG-AC-9 scalar state summary promoted per folder (order-stable for the shared fixture).
 # *Amended v11 — `linked_count` is dropped with the gazetteer capability.*
+# *Amended v12 — `ungrounded_relation_count` added (KG-AC-64).*
 _STATE_SCALARS = (
     "entity_count", "edge_count", "distinct_types", "top_entities",
-    "ontology_pack", "ontology_version", "unmapped_type_count",
+    "ontology_pack", "ontology_version", "unmapped_type_count", "ungrounded_relation_count",
 )
 
 

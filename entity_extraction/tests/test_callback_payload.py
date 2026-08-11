@@ -21,6 +21,7 @@ _SUMMARY = {
     "ontology_pack": "fibo_core",
     "ontology_version": "1.0",
     "unmapped_type_count": 1,
+    "ungrounded_relation_count": 0,
 }
 _USAGE = [{"charge_category": "llm", "model": "amazon.nova-pro-v1:0",
            "input_tokens": 100, "output_tokens": 50, "connection_id": "conn-1"}]
@@ -53,7 +54,8 @@ def test_folders_carry_state_scalars_for_m1_merge():
     state = payload["folders"][0]
     assert state["folder_id"] == "folder-789"
     for field in ("entity_count", "edge_count", "distinct_types", "top_entities",
-                  "ontology_pack", "ontology_version", "unmapped_type_count"):
+                  "ontology_pack", "ontology_version", "unmapped_type_count",
+                  "ungrounded_relation_count"):
         assert field in state, field
     assert state["entity_count"] == 3
 

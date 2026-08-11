@@ -61,6 +61,8 @@ CAPABILITY_SCHEMA: Dict[str, Any] = {
         "ontology_version": {"type": "string", "always_present": True},
         "unmapped_type_count": {"type": "integer", "always_present": True,
                                 "description": "LLM types dropped as out-of-vocab"},
+        "ungrounded_relation_count": {"type": "integer", "always_present": True,
+                                     "description": "LLM relations dropped because their evidence was not found verbatim in the source chunk (KG-AC-64)"},
     },
     "artifact_inputs": {
         "chunks": {"required": "always",
