@@ -1,22 +1,21 @@
 {
   "name": "investment_fibo",
-  "version": "1.0",
-  "description": "Investment relationship ontology — investor/manager relationships, subscription agreements, fund commitments and their commercial terms. Translated 1:1 from the owner-supplied OWL/Turtle (http://example.org/investment#, :InvestmentRelationshipOntology) 2026-08-08: all 12 owl:Class declarations become entity types and all 11 owl:ObjectProperty declarations become relations with their declared rdfs:domain/rdfs:range preserved exactly. The 8 owl:DatatypeProperty declarations have NO representation here — see the _datatype_properties_note field below; that is a real coverage gap, not an oversight.",
+  "version": "1.1",
+  "description": "Investment relationship ontology — investor/manager relationships, subscription agreements, fund commitments, and commercial terms. Updated to support direct concrete entity-to-entity relations and companion value entities for attributes.",
   "_source_ontology": "owner-supplied OWL/Turtle, :InvestmentRelationshipOntology (@prefix : <http://example.org/investment#>)",
-  "_datatype_properties_note": "The source declares 8 owl:DatatypeProperty (agreementId, effectiveDate, fundName, commitmentAmount, currency, managementFee, performanceFee, lei). ADR-0007's entity_records contract stores typed MENTIONS with provenance, not per-entity attribute key/values, so a datatype property cannot be expressed as either an entity type or a relation. Consequence: amounts, dates, fee percentages, agreement identifiers, AND `lei` in a document are NOT extractable under this pack — v11 (2026-08-08) withdrew the gazetteer/external-id plane that previously captured `lei` as a partial exception, so no datatype property survives translation now. If these facts must land in the graph, the options are (a) add companion entity types (MonetaryAmount/Date/Percentage/Identifier) plus relations to carry them, or (b) extend the artifact contract with an attribute plane — (b) is an ADR-0007 change, not a pack edit.",
   "entity_types": [
     {
       "type": "InvestmentRelationship",
       "parent": null,
       "spacy_labels": [],
-      "guidance": "The overall investing relationship between an investor and an investment manager — the top-level record that ties together the parties, their governing agreement and their subscriptions.",
+      "guidance": "The overall investing relationship between an investor and an investment manager — the top-level record that ties together the parties, their governing agreement, and their subscriptions.",
       "iri": "http://example.org/investment#InvestmentRelationship"
     },
     {
       "type": "Investor",
       "parent": null,
       "spacy_labels": [],
-      "guidance": "A party that commits capital — an institution, fund-of-funds, pension scheme, family office or individual subscribing to a fund.",
+      "guidance": "A party that commits capital — an institution, fund-of-funds, pension scheme, family office, or individual subscribing to a fund.",
       "iri": "http://example.org/investment#Investor"
     },
     {
@@ -30,7 +29,7 @@
       "type": "Agreement",
       "parent": null,
       "spacy_labels": [],
-      "guidance": "The contract governing the investment relationship — limited partnership agreement, investment management agreement, subscription agreement or similar named document.",
+      "guidance": "The contract governing the investment relationship — limited partnership agreement, investment management agreement, subscription agreement, or similar named document.",
       "iri": "http://example.org/investment#Agreement"
     },
     {
@@ -44,50 +43,78 @@
       "type": "Fund",
       "parent": null,
       "spacy_labels": [],
-      "guidance": "The named investment vehicle being invested into (a fund, sub-fund, feeder or share class named as such).",
+      "guidance": "The named investment vehicle being invested into (a fund, sub-fund, feeder, or share class named as such).",
       "iri": "http://example.org/investment#Fund"
     },
     {
       "type": "Commitment",
       "parent": null,
       "spacy_labels": [],
-      "guidance": "The committed capital undertaking attached to a subscription — the named commitment obligation itself, not its numeric amount (amounts are a datatype property this pack cannot carry).",
+      "guidance": "The committed capital undertaking attached to a subscription or investor obligation.",
       "iri": "http://example.org/investment#Commitment"
     },
     {
       "type": "CommercialTerms",
       "parent": null,
       "spacy_labels": [],
-      "guidance": "The commercial terms of an agreement — the negotiated economics clause covering fees, hurdles, carry and discounts.",
+      "guidance": "The commercial terms of an agreement — the negotiated economics clause covering fees, hurdles, carry, and discounts.",
       "iri": "http://example.org/investment#CommercialTerms"
     },
     {
       "type": "FeeSchedule",
       "parent": null,
       "spacy_labels": [],
-      "guidance": "A named fee schedule, fee table or fee appendix that defines how fees are calculated.",
+      "guidance": "A named fee schedule, fee table, or fee appendix that defines how fees are calculated.",
       "iri": "http://example.org/investment#FeeSchedule"
     },
     {
       "type": "Amendment",
       "parent": null,
       "spacy_labels": [],
-      "guidance": "A document amending an existing agreement — amendment, restatement, addendum or variation deed.",
+      "guidance": "A document amending an existing agreement — amendment, restatement, addendum, or variation deed.",
       "iri": "http://example.org/investment#Amendment"
     },
     {
       "type": "SideLetter",
       "parent": null,
       "spacy_labels": [],
-      "guidance": "A side letter supplementing an agreement with investor-specific terms (MFN, fee rebates, reporting or capacity rights).",
+      "guidance": "A side letter supplementing an agreement with investor-specific terms (MFN, fee rebates, reporting, or capacity rights).",
       "iri": "http://example.org/investment#SideLetter"
     },
     {
       "type": "LegalEntity",
       "parent": null,
       "spacy_labels": ["ORG"],
-      "guidance": "The formally incorporated legal person behind a party — the registered company, partnership or trust, identified where possible by its Legal Entity Identifier (LEI).",
+      "guidance": "The formally incorporated legal person behind a party — the registered company, partnership, or trust.",
       "iri": "http://example.org/investment#LegalEntity"
+    },
+    {
+      "type": "MonetaryAmount",
+      "parent": null,
+      "spacy_labels": ["MONEY"],
+      "guidance": "A currency and numeric value representation, e.g., $5,000,000 or USD 10M.",
+      "iri": "http://example.org/investment#MonetaryAmount"
+    },
+    {
+      "type": "Date",
+      "parent": null,
+      "spacy_labels": ["DATE"],
+      "guidance": "An effective date, execution date, or termination date stated in text.",
+      "iri": "http://example.org/investment#Date"
+    },
+    {
+      "type": "Percentage",
+      "parent": null,
+      "spacy_labels": ["PERCENT"],
+      "guidance": "A percentage rate such as management fee rate, performance fee rate, or hurdle rate.",
+      "iri": "http://example.org/investment#Percentage"
+    },
+    {
+      "type": "Identifier",
+      "parent": null,
+      "spacy_labels": [],
+      "guidance": "A formal identifier such as an LEI code, registration number, or contract identification code.",
+      "iri": "http://example.org/investment#Identifier"
     }
   ],
   "relations": [
@@ -114,37 +141,51 @@
     },
     {
       "type": "hasSubscription",
-      "domain": ["InvestmentRelationship"],
+      "domain": ["InvestmentRelationship", "Investor"],
       "range": ["Subscription"],
-      "guidance": "An investment relationship includes a subscription.",
+      "guidance": "An investment relationship or investor executes a subscription.",
       "iri": "http://example.org/investment#hasSubscription"
     },
     {
-      "type": "investsInFund",
-      "domain": ["Subscription"],
+      "type": "partyToAgreement",
+      "domain": ["Investor", "InvestmentManager", "LegalEntity"],
+      "range": ["Agreement", "SideLetter", "Amendment"],
+      "guidance": "A party, manager, or legal entity that enters into or signs an agreement, side letter, or amendment.",
+      "iri": "http://example.org/investment#partyToAgreement"
+    },
+    {
+      "type": "managesFund",
+      "domain": ["InvestmentManager"],
       "range": ["Fund"],
-      "guidance": "A subscription invests into a named fund.",
+      "guidance": "An investment manager manages, operates, or sponsors a fund.",
+      "iri": "http://example.org/investment#managesFund"
+    },
+    {
+      "type": "investsInFund",
+      "domain": ["Subscription", "Investor"],
+      "range": ["Fund"],
+      "guidance": "A subscription or investor invests directly into a named fund.",
       "iri": "http://example.org/investment#investsInFund"
     },
     {
       "type": "hasCommitment",
-      "domain": ["Subscription"],
+      "domain": ["Subscription", "Investor", "InvestmentRelationship"],
       "range": ["Commitment"],
-      "guidance": "A subscription carries a capital commitment.",
+      "guidance": "A subscription, investor, or relationship carries a capital commitment obligation.",
       "iri": "http://example.org/investment#hasCommitment"
     },
     {
       "type": "hasCommercialTerms",
-      "domain": ["Agreement"],
+      "domain": ["Agreement", "SideLetter", "Amendment"],
       "range": ["CommercialTerms"],
-      "guidance": "An agreement sets out commercial terms.",
+      "guidance": "An agreement, side letter, or amendment sets out commercial terms.",
       "iri": "http://example.org/investment#hasCommercialTerms"
     },
     {
       "type": "definedByFeeSchedule",
-      "domain": ["CommercialTerms"],
+      "domain": ["CommercialTerms", "Agreement"],
       "range": ["FeeSchedule"],
-      "guidance": "Commercial terms are defined by a fee schedule.",
+      "guidance": "Commercial terms or agreements are defined by a fee schedule.",
       "iri": "http://example.org/investment#definedByFeeSchedule"
     },
     {
@@ -163,10 +204,38 @@
     },
     {
       "type": "hasLegalEntity",
-      "domain": ["Investor"],
+      "domain": ["Investor", "InvestmentManager", "Fund"],
       "range": ["LegalEntity"],
-      "guidance": "An investor is backed by a formally incorporated legal entity.",
+      "guidance": "An investor, manager, or fund is backed by a formally incorporated legal entity.",
       "iri": "http://example.org/investment#hasLegalEntity"
+    },
+    {
+      "type": "hasValueAmount",
+      "domain": ["Commitment", "CommercialTerms", "FeeSchedule"],
+      "range": ["MonetaryAmount"],
+      "guidance": "A commitment or commercial term has a specific monetary value amount.",
+      "iri": "http://example.org/investment#hasValueAmount"
+    },
+    {
+      "type": "hasFeeRate",
+      "domain": ["CommercialTerms", "FeeSchedule"],
+      "range": ["Percentage"],
+      "guidance": "A commercial term or fee schedule defines a fee percentage rate.",
+      "iri": "http://example.org/investment#hasFeeRate"
+    },
+    {
+      "type": "effectiveOnDate",
+      "domain": ["Agreement", "Amendment", "SideLetter", "Subscription"],
+      "range": ["Date"],
+      "guidance": "The effective or execution date of a document or subscription.",
+      "iri": "http://example.org/investment#effectiveOnDate"
+    },
+    {
+      "type": "hasIdentifier",
+      "domain": ["LegalEntity", "Investor", "InvestmentManager", "Agreement"],
+      "range": ["Identifier"],
+      "guidance": "An entity or agreement has an official registration number, LEI, or reference identifier.",
+      "iri": "http://example.org/investment#hasIdentifier"
     }
   ],
   "dep_patterns": []
