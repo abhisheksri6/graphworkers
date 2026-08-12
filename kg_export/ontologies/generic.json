@@ -1,0 +1,23 @@
+{
+  "name": "generic",
+  "version": "1.0",
+  "description": "Domain-neutral SAMPLE pack (ADR-0008): spaCy en_core_web_lg NER labels mapped ~1:1, flat (no parent hierarchy), no relations. A starting point a customer copies to author a domain pack.",
+  "entity_types": [
+    {"type": "Organization", "parent": null, "spacy_labels": ["ORG"], "guidance": "Companies, agencies, institutions."},
+    {"type": "Person", "parent": null, "spacy_labels": ["PERSON"], "guidance": "People, including fictional."},
+    {"type": "Location", "parent": null, "spacy_labels": ["LOC", "GPE"], "guidance": "Geographic or political locations."},
+    {"type": "Facility", "parent": null, "spacy_labels": ["FAC"], "guidance": "Buildings, airports, highways, bridges."},
+    {"type": "Product", "parent": null, "spacy_labels": ["PRODUCT"], "guidance": "Objects, vehicles, foods (not services)."},
+    {"type": "Event", "parent": null, "spacy_labels": ["EVENT"], "guidance": "Named hurricanes, battles, wars, sports events."},
+    {"type": "WorkOfArt", "parent": null, "spacy_labels": ["WORK_OF_ART"], "guidance": "Titles of books, songs, etc."},
+    {"type": "Law", "parent": null, "spacy_labels": ["LAW"], "guidance": "Named documents made into laws."},
+    {"type": "Language", "parent": null, "spacy_labels": ["LANGUAGE"], "guidance": "Any named language."},
+    {"type": "Norp", "parent": null, "spacy_labels": ["NORP"], "guidance": "Nationalities, religious or political groups."},
+    {"type": "MonetaryAmount", "parent": null, "spacy_labels": ["MONEY"], "guidance": "Monetary values, including unit."},
+    {"type": "Percentage", "parent": null, "spacy_labels": ["PERCENT"], "guidance": "Percentages, including the % sign."},
+    {"type": "Date", "parent": null, "spacy_labels": ["DATE"], "guidance": "Absolute or relative dates or periods."},
+    {"type": "Time", "parent": null, "spacy_labels": ["TIME"], "guidance": "Times smaller than a day."},
+    {"type": "Quantity", "parent": null, "spacy_labels": ["QUANTITY"], "guidance": "Measurements, as of weight or distance."}
+  ],
+  "relations": []
+}

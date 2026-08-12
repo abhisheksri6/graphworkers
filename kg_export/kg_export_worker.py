@@ -26,6 +26,7 @@ import store
 from capability_schema import CAPABILITY_SCHEMA  # re-exported per WORKER_NAMING
 from clients import Neo4jConnectionError, Neo4jExporter
 from core import run_export
+from ontologies import load_pack
 
 __all__ = ["CAPABILITY_SCHEMA", "celery_app", "kg_export_task", "process_export"]
 
@@ -71,7 +72,15 @@ def process_export(task_id, folder_ids: Sequence[str], kg_export_config, dag_id,
 
         conn = db.connection().connection
         with conn.cursor() as cur:
-            nodes, edges = store.read_canonical_graph(cur, folder_ids)
+            # KG-AC-83/86: resolve the pack for ontology-qualified export -- an unresolvable pack
+            # name (or none at all) is NOT fatal, per KG-AC-86's own "not an error" clause; the
+            # export simply proceeds with bare names (pack=None).
+            pack_name = store.batch_pack_name(cur, folder_ids)
+            try:
+                pack = load_pack(pack_name) if pack_name else None
+            except Exception:  # noqa: BLE001 — an unloadable pack degrades to bare names, never fails export
+                pack = None
+            nodes, edges = store.read_canonical_graph(cur, folder_ids, pack=pack)
 
         exp_cm = exporter if exporter is not None else Neo4jExporter(connection_id, database=cfg.get("database"))
         with exp_cm as exp:

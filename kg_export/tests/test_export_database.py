@@ -143,6 +143,9 @@ class _FakeDb:
                     def fetchall(self_inner):
                         return []
 
+                    def fetchone(self_inner):
+                        return None  # no pack resolvable -> bare-name export, not an error
+
                 return _Cur()
 
         return type("_W", (), {"connection": _Conn()})()

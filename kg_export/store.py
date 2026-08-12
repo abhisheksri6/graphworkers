@@ -16,12 +16,12 @@ from typing import List, Optional, Sequence, Tuple
 from core import CanonicalEdge, CanonicalNode
 
 _NODE_SQL = """
-    SELECT ce.canonical_id, ce.entity_type, ce.normalized_form,
+    SELECT ce.canonical_id, ce.entity_type, ce.normalized_form, ce.attributes,
            array_agg(DISTINCT e.folder_id) AS folders, count(*) AS mention_count
       FROM public.kg_entities e
       JOIN public.kg_canonical_entities ce ON ce.canonical_id = e.canonical_id
      WHERE e.stage = 'canonicalized' {node_filter}
-     GROUP BY ce.canonical_id, ce.entity_type, ce.normalized_form
+     GROUP BY ce.canonical_id, ce.entity_type, ce.normalized_form, ce.attributes
      ORDER BY ce.canonical_id
 """
 
@@ -33,17 +33,48 @@ _EDGE_SQL = """
 """
 
 
+def batch_pack_name(cur, folder_ids: Optional[Sequence[str]] = None) -> Optional[str]:
+    """KG-AC-83/86: the ontology_pack to load so `iri` resolution has a pack to read (mirrors
+    `entity_canonicalization.store.batch_pack_name` exactly, scoped to `stage = 'canonicalized'`
+    since kg_export reads past that point). ``folder_ids=None`` (a full rebuild, KG-AC-28) has no
+    single batch to scope to — picks ANY one canonicalized row's pack (the common, single-pack-in-
+    practice case); a genuinely mixed-pack rebuild degrades some nodes to bare names, which is
+    explicitly not an error (KG-AC-86)."""
+    if folder_ids:
+        cur.execute(
+            """SELECT ontology_pack FROM public.kg_entities
+                WHERE folder_id = ANY(%s) AND stage = 'canonicalized' AND ontology_pack IS NOT NULL
+                LIMIT 1""",
+            (list(folder_ids),),
+        )
+    else:
+        cur.execute(
+            """SELECT ontology_pack FROM public.kg_entities
+                WHERE stage = 'canonicalized' AND ontology_pack IS NOT NULL
+                LIMIT 1""",
+        )
+    row = cur.fetchone()
+    return row[0] if row else None
+
+
 def read_canonical_graph(
-    cur, folder_ids: Optional[Sequence[str]] = None,
+    cur, folder_ids: Optional[Sequence[str]] = None, pack=None,
 ) -> Tuple[List[CanonicalNode], List[CanonicalEdge]]:
+    """KG-AC-83/86 (v13): ``pack`` (optional — the CALLER's already-loaded ontology pack via
+    `ontologies.load_pack(batch_pack_name(...))`, matching the entity_canonicalization worker's own
+    load-in-the-worker-file precedent — store.py stays pure DB access, never imports `ontologies`
+    itself) resolves each node's/edge's `iri` for the ontology-qualified export. No pack (or an
+    unknown entity_type/relation_type within it) simply exports bare names (KG-AC-86's own "not an
+    error" clause) — never fails the export."""
     if folder_ids:
         cur.execute(_NODE_SQL.format(node_filter="AND e.folder_id = ANY(%s)"), (list(folder_ids),))
     else:
         cur.execute(_NODE_SQL.format(node_filter=""))
     nodes = [
         CanonicalNode(
-            canonical_id=str(r[0]), entity_type=r[1], normalized_form=r[2],
-            provenance={"folders": [f for f in (r[3] or []) if f], "mentions": r[4]},
+            canonical_id=str(r[0]), entity_type=r[1], normalized_form=r[2], attributes=r[3] or {},
+            provenance={"folders": [f for f in (r[4] or []) if f], "mentions": r[5]},
+            entity_iri=_entity_iri(pack, r[1]),
         )
         for r in cur.fetchall()
     ]
@@ -63,7 +94,22 @@ def read_canonical_graph(
             src_canonical_id=str(r[0]), relation_type=r[1], dst_canonical_id=str(r[2]),
             support_count=r[3], confidence=float(r[4]) if r[4] is not None else None,
             evidence_text=list(r[5]) if r[5] is not None else [],
+            relation_iri=_relation_iri(pack, r[1]),
         )
         for r in cur.fetchall()
     ]
     return nodes, edges
+
+
+def _entity_iri(pack, entity_type: str) -> Optional[str]:
+    if pack is None:
+        return None
+    et = pack.entity_types.get(entity_type)
+    return et.iri if et else None
+
+
+def _relation_iri(pack, relation_type: str) -> Optional[str]:
+    if pack is None:
+        return None
+    rel = pack.relations.get(relation_type)
+    return rel.iri if rel else None

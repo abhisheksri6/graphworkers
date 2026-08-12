@@ -131,3 +131,135 @@ def test_db_round_trip_collapses_and_projects(conn):
             cur.execute("DELETE FROM public.kg_entities WHERE folder_id=%s", (folder,))
             cur.execute("DELETE FROM public.kg_canonical_entities WHERE canonical_key IN (%s,%s)", (key_bank, key_bond))
         conn.commit()
+
+
+@pytest.mark.ac("KG-AC-83")
+def test_db_round_trip_carries_merged_facts_as_attributes(conn):
+    # P11/P13's merged-attributes shape (kg_canonical_entities.attributes) survives into the
+    # CanonicalNode kg_export builds -- proves the READ side; test_fact_export.py proves the
+    # BUILD side (facts -> Cypher properties) from this same shape.
+    import json as _json
+    folder = f"kgexpfacts-{uuid.uuid4()}"
+    cid = str(uuid.uuid4())
+    key = f"agreement:{folder}"
+    attrs = {"governingLaw": [{"value": "England and Wales", "normalized_value": "England and Wales",
+                               "status": "single_source", "provenance": []}]}
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO public.kg_canonical_entities
+                       (canonical_id, canonical_key, entity_type, normalized_form, attributes)
+                   VALUES (%s,%s,'Agreement',%s,%s)""",
+                (cid, key, folder, _json.dumps(attrs)),
+            )
+            cur.execute(
+                """INSERT INTO public.kg_entities
+                       (folder_id, entity_uid, entity_type, surface_form, canonical_id,
+                        ontology_pack, ontology_version, stage)
+                   VALUES (%s,'u1','Agreement','the Agreement',%s,'fibo_core','1.0','canonicalized')""",
+                (folder, cid),
+            )
+        conn.commit()
+
+        with conn.cursor() as cur:
+            nodes, _edges = read_canonical_graph(cur, [folder])
+        assert len(nodes) == 1
+        assert nodes[0].attributes == attrs
+    finally:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM public.kg_entities WHERE folder_id=%s", (folder,))
+            cur.execute("DELETE FROM public.kg_canonical_entities WHERE canonical_key=%s", (key,))
+        conn.commit()
+
+
+@pytest.mark.ac("KG-AC-86")
+def test_db_round_trip_resolves_entity_and_relation_iri_from_the_passed_pack(conn):
+    from ontologies import load_pack
+    pack = load_pack("investment_fibo")
+    folder = f"kgexpiri-{uuid.uuid4()}"
+    cid_investor = str(uuid.uuid4())
+    key_investor = f"investor:{folder}"
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO public.kg_canonical_entities (canonical_id, canonical_key, entity_type, normalized_form)
+                   VALUES (%s,%s,'Investor',%s)""", (cid_investor, key_investor, folder))
+            cur.execute(
+                """INSERT INTO public.kg_entities
+                       (folder_id, entity_uid, entity_type, surface_form, canonical_id,
+                        ontology_pack, ontology_version, stage)
+                   VALUES (%s,'u1','Investor','XYZ Insurance',%s,'investment_fibo','2.4','canonicalized')""",
+                (folder, cid_investor),
+            )
+        conn.commit()
+
+        with conn.cursor() as cur:
+            nodes, _edges = read_canonical_graph(cur, [folder], pack=pack)
+        assert nodes[0].entity_iri == pack.entity_types["Investor"].iri
+        assert nodes[0].entity_iri.endswith("#Investor")
+    finally:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM public.kg_entities WHERE folder_id=%s", (folder,))
+            cur.execute("DELETE FROM public.kg_canonical_entities WHERE canonical_key=%s", (key_investor,))
+        conn.commit()
+
+
+@pytest.mark.ac("KG-AC-86")
+def test_db_round_trip_with_no_pack_exports_none_iri_not_an_error(conn):
+    # read_canonical_graph(pack=None) -- the caller's own "couldn't resolve a pack" degradation --
+    # must never raise; entity_iri simply stays None, and qualified_name's own bare-name fallback
+    # (proved in test_ontology_qualified_export.py) takes it from there.
+    folder = f"kgexpnopack-{uuid.uuid4()}"
+    cid = str(uuid.uuid4())
+    key = f"fund:{folder}"
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO public.kg_canonical_entities (canonical_id, canonical_key, entity_type, normalized_form)
+                   VALUES (%s,%s,'Fund',%s)""", (cid, key, folder))
+            cur.execute(
+                """INSERT INTO public.kg_entities
+                       (folder_id, entity_uid, entity_type, surface_form, canonical_id,
+                        ontology_pack, ontology_version, stage)
+                   VALUES (%s,'u1','Fund','Acme Fund',%s,'investment_fibo','2.4','canonicalized')""",
+                (folder, cid),
+            )
+        conn.commit()
+
+        with conn.cursor() as cur:
+            nodes, _edges = read_canonical_graph(cur, [folder], pack=None)
+        assert nodes[0].entity_iri is None
+    finally:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM public.kg_entities WHERE folder_id=%s", (folder,))
+            cur.execute("DELETE FROM public.kg_canonical_entities WHERE canonical_key=%s", (key,))
+        conn.commit()
+
+
+@pytest.mark.ac("KG-AC-83")
+@pytest.mark.ac("KG-AC-86")
+def test_batch_pack_name_scoped_and_unscoped(conn):
+    from store import batch_pack_name
+    folder = f"kgexppack-{uuid.uuid4()}"
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO public.kg_entities
+                       (folder_id, entity_uid, entity_type, surface_form,
+                        ontology_pack, ontology_version, stage)
+                   VALUES (%s,'u1','Agreement','X','investment_fibo','2.4','canonicalized')""",
+                (folder,),
+            )
+        conn.commit()
+
+        with conn.cursor() as cur:
+            scoped = batch_pack_name(cur, [folder])
+        assert scoped == "investment_fibo"
+
+        with conn.cursor() as cur:
+            unscoped = batch_pack_name(cur, None)  # a full-rebuild call -- picks SOME real pack
+        assert unscoped is not None
+    finally:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM public.kg_entities WHERE folder_id=%s", (folder,))
+        conn.commit()
