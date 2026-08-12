@@ -55,22 +55,49 @@ class LlmConnectionError(RuntimeError):
     "no client was even provided to the strategy"."""
 
 
+def _touches_abstract_type(relation, pack) -> bool:
+    """KG-AC-89 (v14): a relation whose domain OR range names an abstract type can never be
+    correctly emitted by the model once that type is no longer in its own `entities[]` (there is
+    nothing for src_id/dst_id to reference) — so it is excluded from the vocabulary alongside the
+    type itself, not left dangling as an offer the model can only fail at. Q3/Q4's auto-relation
+    derivation still uses `pack.relations` directly and is unaffected — this only changes what the
+    LLM-facing prompt/schema builders advertise."""
+    sides = list(relation.domain) + list(relation.range)
+    return any(pack.entity_types.get(t) and pack.entity_types[t].abstract for t in sides)
+
+
 def build_graph_system_prompt(pack) -> str:
     """The STATIC vocabulary + instructions — identical for every chunk in a batch, marked
     cacheable by the client (KG-AC-43 mechanism note). No chunk text; no 'return JSON' instruction
     (the tool schema replaces that)."""
-    entity_lines = [f"- {t.type}: {t.guidance}".rstrip(": ") for t in pack.entity_types.values()]
+    # KG-AC-89 (v14): abstract types are minted deterministically by a post-extraction pass
+    # (Q3/Q4), not by the model — so they are never offered here. An abstract type's guidance
+    # text is where the old "name it after..." synthesise-instruction lived; omitting the type
+    # omits that instruction for free.
+    entity_lines = [
+        f"- {t.type}: {t.guidance}".rstrip(": ") for t in pack.entity_types.values() if not t.abstract
+    ]
     entity_vocab = "\n".join(entity_lines)
+    # KG-AC-89: a relation touching an abstract type on either side is excluded alongside it —
+    # see _touches_abstract_type.
     relation_lines = [
         f"- {r.type} (domain: {', '.join(r.domain)}; range: {', '.join(r.range)}): {r.guidance}".rstrip(": ")
-        for r in pack.relations.values()
+        for r in pack.relations.values() if not _touches_abstract_type(r, pack)
     ]
     relation_vocab = "\n".join(relation_lines) or "(this pack declares no relation types)"
     # KG-AC-70 (v13): only mention facts when the pack declares an attribute vocabulary at all —
     # a pack with none loads (and prompts) exactly as before v13 (KG-AC-69's compatibility promise).
+    # KG-AC-89 (v14): a datatype_property whose domain is an abstract type is excluded too — its
+    # subject would need to be a model-emitted entity, and an abstract type's entity no longer is
+    # one. NOTE (flagged, not silently resolved): this is a real capability gap, not just vocabulary
+    # cleanup — the pack's own datatype_properties on Commitment/CommercialTerms (amounts, dates,
+    # fees, billing frequency) become unextractable under v14 as currently frozen, with no
+    # mechanism yet to attach facts to a DERIVED entity. Excluding them here only stops the model
+    # from being offered vocabulary it can only fail at; it does not solve the gap.
     fact_lines = [
         f"- {p.property} (subject: {p.domain}): {p.guidance}".rstrip(": ")
         for p in pack.datatype_properties.values()
+        if not (pack.entity_types.get(p.domain) and pack.entity_types[p.domain].abstract)
     ]
     facts_block = ""
     if fact_lines:
@@ -119,9 +146,17 @@ def build_graph_user_prompt(chunk_text: str) -> str:
 def build_graph_tool_schema(pack) -> Dict[str, Any]:
     """A per-pack JSON schema for the tool's input — closed-vocabulary ENFORCED at the schema level
     (enum-constrained type fields), on top of the existing downstream filters."""
-    entity_types = sorted(pack.entity_types.keys())
-    relation_types = sorted(pack.relations.keys())
-    property_names = sorted(pack.datatype_properties.keys())
+    # KG-AC-89 (v14): abstract types never appear in the entity-type enum — they are minted by a
+    # deterministic post-extraction pass (Q3/Q4), never returned by the model.
+    entity_types = sorted(t.type for t in pack.entity_types.values() if not t.abstract)
+    # KG-AC-89: same exclusion applied to relations — see _touches_abstract_type.
+    relation_types = sorted(r.type for r in pack.relations.values() if not _touches_abstract_type(r, pack))
+    # KG-AC-89: same exclusion as the prompt's fact_lines — see the note there (flagged gap, not
+    # silently resolved).
+    property_names = sorted(
+        p.property for p in pack.datatype_properties.values()
+        if not (pack.entity_types.get(p.domain) and pack.entity_types[p.domain].abstract)
+    )
     entity_item = {
         "type": "object",
         "properties": {
