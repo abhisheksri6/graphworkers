@@ -50,6 +50,8 @@ CAPABILITY_SCHEMA: Dict[str, Any] = {
                                                                   "description": "Self-consistency voting: run the active LLM relation mode k times and keep majority-vote relations (default 1 = off, bounded 1-5, KG-AC-67)"},
         "entity_extraction_config.llm_max_tokens": {"type": "integer", "required": "optional",
                                                     "description": "Bedrock Converse maxTokens override for the LLM tool-use call (default: the client's built-in 4096); raise for packs/documents whose extraction output legitimately needs more room (KG-AC-87)"},
+        "entity_extraction_config.llm_model": {"type": "string", "required": "optional",
+                                               "description": "Bedrock Converse model id override for the LLM tool-use call (default: the connection's own configured model, then the client's built-in default); set per-profile so two profiles sharing one AWS connection can use different models (KG-AC-95)"},
     },
     "output_fields": {
         "folder_id": {"type": "string", "always_present": True},

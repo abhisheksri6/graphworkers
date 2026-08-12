@@ -1,0 +1,95 @@
+{
+  "entities": [
+    {
+      "type": "Investor",
+      "surface": "Global University Endowment"
+    },
+    {
+      "type": "InvestmentManager",
+      "surface": "T. Rowe Price Associates, Inc."
+    },
+    {
+      "type": "Investor",
+      "surface": "Global University Endowment"
+    },
+    {
+      "type": "InvestmentManager",
+      "surface": "T. Rowe Price Associates, Inc."
+    },
+    {
+      "type": "Investor",
+      "surface": "Global University Endowment"
+    },
+    {
+      "type": "InvestmentManager",
+      "surface": "T. Rowe Price Associates, Inc."
+    },
+    {
+      "type": "Agreement",
+      "surface": "INVESTMENT ADVISORY AND FIDUCIARY MANAGEMENT AGREEMENT"
+    }
+  ],
+  "facts": [
+    {
+      "subject_id": 0,
+      "property": "name",
+      "value": "Global University Endowment",
+      "evidence": "Global University Endowment | IMA-GUE-2026-101 Page 1"
+    },
+    {
+      "subject_id": 2,
+      "property": "name",
+      "value": "Global University Endowment",
+      "evidence": "by and between Global University Endowment (the \"Investor\") and T. Rowe Price Associates, Inc. (the \"Investment Manager\")."
+    },
+    {
+      "subject_id": 4,
+      "property": "name",
+      "value": "Global University Endowment",
+      "evidence": "Investor Global University Endowment"
+    },
+    {
+      "subject_id": 1,
+      "property": "investmentManagerName",
+      "value": "T. Rowe Price Associates, Inc.",
+      "evidence": "by and between Global University Endowment (the \"Investor\") and T. Rowe Price Associates, Inc. (the \"Investment Manager\")."
+    },
+    {
+      "subject_id": 3,
+      "property": "investmentManagerName",
+      "value": "T. Rowe Price Associates, Inc.",
+      "evidence": "Investment Manager T. Rowe Price Associates, Inc."
+    },
+    {
+      "subject_id": 5,
+      "property": "investmentManagerName",
+      "value": "T. Rowe Price Associates, Inc.",
+      "evidence": "The Investor appoints T. Rowe Price Associates, Inc."
+    },
+    {
+      "subject_id": 6,
+      "property": "agreementId",
+      "value": "IMA-GUE-2026-101",
+      "evidence": "Agreement Identifier: IMA-GUE-2026-101"
+    },
+    {
+      "subject_id": 6,
+      "property": "agreementType",
+      "value": "Investment Advisory and Fiduciary Management Agreement",
+      "evidence": "Agreement Type Investment Advisory and Fiduciary Management Agreement"
+    },
+    {
+      "subject_id": 6,
+      "property": "effectiveDate",
+      "value": "February 15, 2026",
+      "evidence": "effective February 15, 2026 (the \"Effective Date\")"
+    },
+    {
+      "subject_id": 6,
+      "property": "governingLaw",
+      "value": "laws of the State of New York",
+      "evidence": "This Agreement shall be governed by and construed in accordance with the laws of the State of New York, without regard to conflict-of-law principles that would require application of the law of another jurisdiction."
+    }
+  ],
+  "relations": []
+}

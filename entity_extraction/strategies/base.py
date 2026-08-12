@@ -59,6 +59,9 @@ class ExtractionConfig:
                                             # bounded to [1,5] at point of use (run_pipeline)
     llm_max_tokens: Optional[int] = None   # KG-AC-87 — Bedrock Converse maxTokens override;
                                             # None = the client's own default (today's 4096, unchanged)
+    llm_model: Optional[str] = None        # KG-AC-95 — Bedrock Converse model id override, set on
+                                            # the PROFILE (not the shared connection); None = the
+                                            # connection's own configured model, then the client default
 
     @classmethod
     def from_dict(cls, d: dict) -> "ExtractionConfig":
@@ -76,6 +79,7 @@ class ExtractionConfig:
             relation_strategy=d.get("relation_strategy", "generate"),
             relation_self_consistency_k=int(d.get("relation_self_consistency_k", 1)),
             llm_max_tokens=int(d["llm_max_tokens"]) if d.get("llm_max_tokens") is not None else None,
+            llm_model=d.get("llm_model"),
         )
 
 
