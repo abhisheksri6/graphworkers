@@ -152,7 +152,14 @@ def validate_facts(
         if dp is None:
             unmapped_property += 1
             continue
-        if f.subject_type != dp.domain and not pack.is_descendant(f.subject_type, dp.domain):
+        # KG-AC-93 (v15): the pack-declared ANCHOR of an abstract domain also satisfies it — the
+        # model is offered such a property under that anchor (it cannot emit the abstract type at
+        # all, KG-AC-89), and derivation re-parents the fact onto the minted instance afterwards.
+        # Read from the pack's own `identity_from`, never inferred from co-occurrence.
+        anchor = pack.anchor_type_for(dp.domain)
+        if (f.subject_type != dp.domain
+                and not pack.is_descendant(f.subject_type, dp.domain)
+                and f.subject_type != anchor):
             unmapped_property += 1
             continue
         chunk_text = chunk_text_by_id.get(f.source_chunk_id, "")

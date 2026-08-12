@@ -184,4 +184,59 @@ def test_derived_edge_carries_no_fabricated_evidence_but_keeps_provenance():
 def test_empty_folder_is_a_clean_no_op():
     derived, edges, counters = derive_abstract_entities("f1", [], _pack(), "investment_fibo", "2.3")
     assert derived == [] and edges == []
-    assert counters == {"underivable_entity_count": 0, "ambiguous_attachment_count": 0}
+    assert counters == {"underivable_entity_count": 0, "ambiguous_attachment_count": 0,
+                        "unanchored_fact_count": 0}
+
+
+# ---- R2: attribute anchoring + re-parenting (KG-AC-93) ------------------------------------------
+@pytest.mark.ac("KG-AC-93")
+def test_anchored_fact_is_reparented_onto_the_derived_instance():
+    rows = [_row("Agreement", "the Agreement", uid="agr", attributes=[
+        _attr("agreementId", "IMA-2025-018"),
+        _attr("managementFee", "1.5% per annum"),   # domain=CommercialTerms, offered under Agreement
+        _attr("governingLaw", "England and Wales"),  # domain=Agreement -- must NOT move
+    ])]
+    derived, _, counters = derive_abstract_entities("f1", rows, _pack(), "investment_fibo", "2.3")
+    hub = next(r for r in derived if r["entity_type"] == "CommercialTerms")
+    assert [a["property"] for a in hub["attributes"]] == ["managementFee"]
+    # ...and it is REMOVED from the anchor, which does not declare that property
+    anchor_props = {a["property"] for a in rows[0]["attributes"]}
+    assert anchor_props == {"agreementId", "governingLaw"}
+    assert counters["unanchored_fact_count"] == 0
+
+
+@pytest.mark.ac("KG-AC-93")
+def test_reparented_fact_keeps_its_own_provenance():
+    rows = [_row("Agreement", "the Agreement", attributes=[
+        _attr("agreementId", "IMA-2025-018"), _attr("managementFee", "1.5%")])]
+    derived, _, _ = derive_abstract_entities("f1", rows, _pack(), "investment_fibo", "2.3")
+    fee = next(r for r in derived if r["entity_type"] == "CommercialTerms")["attributes"][0]
+    # the hub itself has no evidence (KG-AC-92) but its attributes remain individually traceable
+    assert fee["source_doc_id"] == "d.pdf" and fee["page"] == 1 and fee["evidence"] == "e"
+
+
+@pytest.mark.ac("KG-AC-93")
+def test_two_agreements_reparent_nothing_and_count():
+    # the fact->hub pairing is undeterminable with two identity values -- same reasoning as
+    # KG-AC-91(b)'s edge rule. Never guessed, and never left on the anchor either.
+    rows = [
+        _row("Agreement", "A1", uid="a1", attributes=[
+            _attr("agreementId", "IMA-2025-018"), _attr("managementFee", "1.5%")]),
+        _row("Agreement", "A2", uid="a2", span=50, attributes=[_attr("agreementId", "IMA-2025-019")]),
+    ]
+    derived, _, counters = derive_abstract_entities("f1", rows, _pack(), "investment_fibo", "2.3")
+    for hub in (r for r in derived if r["entity_type"] == "CommercialTerms"):
+        assert hub["attributes"] == []
+    assert counters["unanchored_fact_count"] == 1
+    assert all(a["property"] != "managementFee" for a in rows[0]["attributes"])
+
+
+@pytest.mark.ac("KG-AC-93")
+def test_commitment_anchors_on_subscription_not_agreement():
+    # each abstract type anchors on ITS OWN declared identity_from -- Commitment's is Subscription.
+    rows = [_row("Subscription", "SUB-2025-041", attributes=[
+        _attr("subscriptionId", "SUB-2025-041"), _attr("commitmentAmount", "25,000,000")])]
+    derived, _, _ = derive_abstract_entities("f1", rows, _pack(), "investment_fibo", "2.3")
+    hub = next(r for r in derived if r["entity_type"] == "Commitment")
+    assert hub["surface_form"] == "SUB-2025-041"
+    assert [a["property"] for a in hub["attributes"]] == ["commitmentAmount"]

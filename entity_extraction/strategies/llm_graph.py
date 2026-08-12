@@ -38,7 +38,7 @@ the Converse API's tool-use validates the shape, no downstream json.loads needed
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from core import Candidate, Fact, Relation, normalize_fact_value
 
@@ -53,6 +53,20 @@ class LlmConnectionError(RuntimeError):
     """The llm engine was configured without an LLM connection (KG-AC-15/43 fail-loud). Distinct
     from clients.LlmHardFailure (a connection that WAS configured but failed to invoke) — this is
     "no client was even provided to the strategy"."""
+
+
+def _fact_subject_type(prop, pack) -> Optional[str]:
+    """KG-AC-93 (v15): the type a datatype_property is OFFERED under. For a concrete domain that
+    is the domain itself. For an ABSTRACT domain it is the pack-declared **anchor** — the model
+    cannot emit an abstract entity (KG-AC-89), so a property declared on one would otherwise be
+    unextractable; v14 excluded such properties outright, which silently cost 10 real fields in
+    `investment_fibo` (commitment amounts/currency/date/type, management + performance fees,
+    hurdle, billing frequency, settlement currency, fee effective date). Returns None only when
+    the domain is abstract with NO `derived` block — nothing to anchor to, so still omitted."""
+    domain_type = pack.entity_types.get(prop.domain)
+    if domain_type is not None and domain_type.abstract:
+        return pack.anchor_type_for(prop.domain)  # None when un-anchorable
+    return prop.domain
 
 
 def _touches_abstract_type(relation, pack) -> bool:
@@ -87,17 +101,16 @@ def build_graph_system_prompt(pack) -> str:
     relation_vocab = "\n".join(relation_lines) or "(this pack declares no relation types)"
     # KG-AC-70 (v13): only mention facts when the pack declares an attribute vocabulary at all —
     # a pack with none loads (and prompts) exactly as before v13 (KG-AC-69's compatibility promise).
-    # KG-AC-89 (v14): a datatype_property whose domain is an abstract type is excluded too — its
-    # subject would need to be a model-emitted entity, and an abstract type's entity no longer is
-    # one. NOTE (flagged, not silently resolved): this is a real capability gap, not just vocabulary
-    # cleanup — the pack's own datatype_properties on Commitment/CommercialTerms (amounts, dates,
-    # fees, billing frequency) become unextractable under v14 as currently frozen, with no
-    # mechanism yet to attach facts to a DERIVED entity. Excluding them here only stops the model
-    # from being offered vocabulary it can only fail at; it does not solve the gap.
+    # KG-AC-93 (v15): a datatype_property whose domain is an ABSTRACT type is offered under that
+    # type's pack-declared ANCHOR (see _fact_subject_type) — v14 excluded such properties outright,
+    # which silently made 10 real fields unextractable. Derivation re-parents them onto the minted
+    # instance afterwards, so the model only ever names entities it can actually emit.
     fact_lines = [
-        f"- {p.property} (subject: {p.domain}): {p.guidance}".rstrip(": ")
-        for p in pack.datatype_properties.values()
-        if not (pack.entity_types.get(p.domain) and pack.entity_types[p.domain].abstract)
+        f"- {p.property} (subject: {subject}): {p.guidance}".rstrip(": ")
+        for p, subject in (
+            (p, _fact_subject_type(p, pack)) for p in pack.datatype_properties.values()
+        )
+        if subject is not None
     ]
     facts_block = ""
     if fact_lines:
@@ -155,7 +168,7 @@ def build_graph_tool_schema(pack) -> Dict[str, Any]:
     # silently resolved).
     property_names = sorted(
         p.property for p in pack.datatype_properties.values()
-        if not (pack.entity_types.get(p.domain) and pack.entity_types[p.domain].abstract)
+        if _fact_subject_type(p, pack) is not None
     )
     entity_item = {
         "type": "object",

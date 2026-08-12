@@ -275,6 +275,18 @@ class Pack:
                 seen.add(cur)
                 cur = self.entity_types[cur].parent
 
+    # -- derived-type anchoring (KG-AC-93, v15) ----------------------------
+    def anchor_type_for(self, entity_type: str) -> Optional[str]:
+        """The CONCRETE type an abstract type's identity hangs off — the ``<Type>`` half of its
+        ``derived.identity_from``. Returns None for a concrete type, or for an abstract type with
+        no ``derived`` block (nothing to anchor to). This is the pack's OWN declaration, which is
+        why fact anchoring needs no heuristic: a `CommercialTerms` property is offered to the model
+        under `Agreement` because the pack already says that is where its identity comes from."""
+        et = self.entity_types.get(entity_type)
+        if et is None or et.derived is None:
+            return None
+        return et.derived.identity_from.partition(".")[0]
+
     # -- closed vocabulary (KG-AC-14) -------------------------------------
     def is_known_type(self, entity_type: str) -> bool:
         return entity_type in self.entity_types

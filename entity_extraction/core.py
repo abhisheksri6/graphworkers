@@ -364,7 +364,8 @@ def derive_abstract_entities(
     so it cannot be resolved through ``entity_uid_key_map``'s ``(chunk, type, surface)`` lookup."""
     derived_rows: List[Dict] = []
     derived_edges: List[Dict] = []
-    counters = {"underivable_entity_count": 0, "ambiguous_attachment_count": 0}
+    counters = {"underivable_entity_count": 0, "ambiguous_attachment_count": 0,
+                "unanchored_fact_count": 0}
 
     for etype, et in pack.entity_types.items():
         spec = et.derived
@@ -414,6 +415,25 @@ def derive_abstract_entities(
             counters["underivable_entity_count"] += 1  # content but no identity: skip, never guess
             continue
 
+        # KG-AC-93 (v15): facts the model attached to the ANCHOR that actually belong to this
+        # abstract type. Collected across every anchor-type row (the abstract type is
+        # document-scoped, so which mention the fact happened to land on is immaterial), then
+        # re-parented below. With MORE than one identity value the fact→hub pairing is not
+        # determinable — same reasoning as KG-AC-91(b)'s edge rule — so they are dropped and
+        # counted rather than guessed at or left on the anchor, which does not declare them.
+        anchored: List[Dict] = []
+        for row in entity_rows:
+            if row.get("entity_type") != anchor_type:
+                continue
+            keep = []
+            for attr in row.get("attributes") or []:
+                (anchored if attr.get("property") in own_props else keep).append(attr)
+            if len(keep) != len(row.get("attributes") or []):
+                row["attributes"] = keep  # strip from the anchor: it does not declare these
+        if anchored and len(identity_values) != 1:
+            counters["unanchored_fact_count"] += len(anchored)
+            anchored = []
+
         for value in identity_values:
             derived_rows.append({
                 "entity_uid": compute_derived_entity_uid(folder_id, etype, value),
@@ -430,7 +450,10 @@ def derive_abstract_entities(
                 "ontology_version": ontology_version,
                 "model_id": None,
                 "stage": "staged",
-                "attributes": [],
+                # KG-AC-93: re-parented facts land here. Each keeps its OWN source_doc_id/page,
+                # so the hub carries no evidence itself (KG-AC-92) while every attribute on it
+                # stays individually evidence-grounded and traceable to real text.
+                "attributes": anchored if len(identity_values) == 1 else [],
             })
 
         # KG-AC-91(b): >1 hub of this type ⇒ the hub↔constituent pairing is not determinable from

@@ -244,8 +244,12 @@ def test_system_prompt_excludes_all_three_real_abstract_types():
     pack = load_pack("investment_fibo")
     prompt = build_graph_system_prompt(pack)
     for abstract_type in ("InvestmentRelationship", "Commitment", "CommercialTerms"):
-        assert abstract_type not in prompt
-    assert "Agreement" in prompt  # concrete types unaffected
+        # structural positions, not raw substring: a property's GUIDANCE may legitimately mention
+        # the word (commitmentType's example is "Institutional Commitment") without the type being
+        # offered. What must never appear is the type as an entity-vocab line or a fact subject.
+        assert f"- {abstract_type}:" not in prompt
+        assert f"subject: {abstract_type})" not in prompt
+    assert "- Agreement:" in prompt  # concrete types unaffected
 
 
 @pytest.mark.ac("KG-AC-89")
@@ -297,31 +301,25 @@ def test_concrete_only_pack_produces_byte_identical_schema_and_prompt():
     assert schema_before["properties"]["entities"]["items"]["properties"]["type"]["enum"] == ["Organization"]
 
 
-@pytest.mark.ac("KG-AC-89")
-def test_datatype_properties_whose_domain_is_abstract_are_also_excluded():
-    # found while writing this task's own tests, not in the literal AC bullet list, and NOT fully
-    # resolved by this task -- flagged explicitly, see the code comment: a datatype_property whose
-    # domain is an abstract type (Commitment.commitmentAmount/currency/commitmentDate/
-    # commitmentType, CommercialTerms.managementFee/performanceFee/performanceHurdle/
-    # billingFrequency/settlementCurrency/feeEffectiveDate — 10 properties total) can never be
-    # correctly emitted as a fact, since its subject_id would need to reference an entity that no
-    # longer exists in the model's own response. Excluding them stops the model being offered
-    # vocabulary it can only fail at; it does NOT provide a replacement mechanism for extracting
-    # this real data (Q3/Q4 only derive the entity + its edges, never its own attributes) — a real
-    # capability gap this task surfaces rather than silently works around.
+@pytest.mark.ac("KG-AC-93")
+def test_abstract_domain_properties_are_offered_under_their_anchor_not_excluded():
+    # v15/R2 REVERSES the v14 exclusion below. Excluding these made 10 real fields permanently
+    # unextractable; they are now offered under the pack-declared anchor (identity_from), which
+    # the model CAN emit, and derivation re-parents them onto the minted instance afterwards.
     pack = load_pack("investment_fibo")
     schema = build_graph_tool_schema(pack)
     property_enum = set(schema["properties"]["facts"]["items"]["properties"]["property"]["enum"])
-    excluded = {"commitmentAmount", "currency", "commitmentDate", "commitmentType",
+    restored = {"commitmentAmount", "currency", "commitmentDate", "commitmentType",
                "managementFee", "performanceFee", "performanceHurdle", "billingFrequency",
                "settlementCurrency", "feeEffectiveDate"}
-    assert property_enum.isdisjoint(excluded)
-    # a concrete-domain property is unaffected
-    assert "agreementId" in property_enum
+    assert restored <= property_enum, "the 10 abstract-domain properties must be offered again"
+    assert len(property_enum) == len(pack.datatype_properties)  # nothing is dropped any more
 
     prompt = build_graph_system_prompt(pack)
-    for prop_name in excluded:
-        assert prop_name not in prompt
+    # ...and each is offered under its ANCHOR, never under the abstract type the model cannot emit
+    assert "- managementFee (subject: Agreement)" in prompt
+    assert "- commitmentAmount (subject: Subscription)" in prompt
+    assert "subject: CommercialTerms" not in prompt and "subject: Commitment)" not in prompt
 
 
 @pytest.mark.ac("KG-AC-89")
