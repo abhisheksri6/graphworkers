@@ -95,7 +95,7 @@ CAPABILITY_SCHEMA: Dict[str, Any] = {
     },
     "artifact_outputs": {
         "entities": {"stage": "staged",
-                     "description": "Entity + edge rows written to kg_entities/kg_edges",
+                     "description": "Entity + edge rows written to kg_entities/kg_edges. Each entity row carries provenance markers a consumer must not conflate: is_abstract (KG-AC-72), extractor='derived' for pack-derived instances (KG-AC-92), and reference_only for an entity the document named with an identifier but never described (KG-AC-94)",
                      "artifact_type": "entity_records", "always_present": True},
     },
 }

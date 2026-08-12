@@ -30,7 +30,8 @@ from core import (
     Candidate, Fact, Relation, assign_occurrence_indices, attach_facts_to_entity_records,
     build_edge_records, build_entity_records, build_summary, derive_abstract_entities,
     entity_uid_key_map, evidence_grounded,
-    filter_bare_pronouns, merge_candidates, merge_edge_records, vote_relations,
+    filter_bare_pronouns, mark_reference_only, merge_candidates, merge_edge_records,
+    vote_relations,
 )
 
 
@@ -346,6 +347,10 @@ def run_pipeline(chunks: List[Chunk], config: ExtractionConfig, pack, *, folder_
     derived_rows, derived_edges, derived_counters = derive_abstract_entities(
         folder_id, ent_rows, pack, config.ontology_pack, pack.version)
     ent_rows = ent_rows + derived_rows
+    # KG-AC-94 (v15): computed from ATTACHED facts, so strictly after derivation's re-parenting —
+    # an anchor whose bundle attributes have just moved off it must not be mis-flagged as an
+    # unread stub. Derived rows are excluded inside the helper (clarify F2).
+    mark_reference_only(ent_rows, pack)
 
     # KG-AC-67 (evolve v12): self-consistency voting needs the deterministic rules-layer relations
     # (already run ONCE, inside run_graph_extraction) kept SEPARATE from the active LLM relation

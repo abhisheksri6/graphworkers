@@ -321,6 +321,36 @@ def attach_facts_to_entity_records(
     return entity_rows
 
 
+def mark_reference_only(entity_rows: List[Dict], pack) -> List[Dict]:
+    """KG-AC-94 (v15): flag entities the document NAMED (with an identifier) but never described —
+    ``Fee Schedule FS-2025-031`` cited in a definitions clause whose actual terms live in another
+    document. They are written, not dropped: this ontology is multi-document, so such a node is the
+    join point canonicalization merges the real document into when it arrives, and dropping it also
+    discards a source-stated relation. The MARKER is the load-bearing half — an unmarked stub is
+    worse than none, because nothing then distinguishes "a Fee Schedule we know exists" from "one we
+    have read" (KG-AC-92's honesty posture, applied to a different distinction).
+
+    Deterministic, from the pack's OWN ``range`` vocabulary (KG-AC-69) — no new declaration and no
+    heuristic: all facts ``identifier``-ranged (or none at all) => reference-only; a single
+    ``string``/``number``/``date`` fact means the document actually described it.
+
+    DERIVED entities are excluded entirely (clarify F2): a ``reified_relation`` hub declares zero
+    own attributes BY DEFINITION, so the rule would mark every one of them an unread stub. They are
+    already marked by ``extractor="derived"``/``is_abstract`` — a different fact about a different
+    thing. Must run AFTER attribute re-parenting (KG-AC-93), or an anchor whose bundle attributes
+    have just moved off it could be mis-flagged. Mutates in place, returns the list."""
+    identifier_props = {
+        p.property for p in pack.datatype_properties.values() if p.range == "identifier"
+    }
+    for row in entity_rows:
+        if row.get("extractor") == "derived":
+            row["reference_only"] = False
+            continue
+        props = [a.get("property") for a in (row.get("attributes") or [])]
+        row["reference_only"] = all(p in identifier_props for p in props)
+    return entity_rows
+
+
 def _representative_constituents(entity_rows: List[Dict], wanted_types: Sequence[str]) -> List[Dict]:
     """KG-AC-91(a): collapse mentions to ONE representative per ``(entity_type, normalized_form)``,
     chosen deterministically as the earliest ``(source_doc_id, source_chunk_id, span_start)``.
