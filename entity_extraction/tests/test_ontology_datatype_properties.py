@@ -109,7 +109,11 @@ def test_investment_fibo_v22_all_three_abstract_types_carry_derived():
     p = load_pack("investment_fibo")
     ir = p.entity_types["InvestmentRelationship"].derived
     assert ir.identity_from == "Agreement.agreementId"
-    assert ir.mint_when == "Agreement"
+    # v2.3 (spec v15): mint_when removed, pattern required -- the presence-of-anchor trigger
+    # minted contentless hubs. InvestmentRelationship is the pack's only reified_relation.
+    assert ir.pattern == "reified_relation"
+    assert p.entity_types["Commitment"].derived.pattern == "attribute_bundle"
+    assert p.entity_types["CommercialTerms"].derived.pattern == "attribute_bundle"
     assert set(ir.auto_relations) == {
         "hasInvestor", "hasInvestmentManager", "governedBy", "hasSubscription",
     }

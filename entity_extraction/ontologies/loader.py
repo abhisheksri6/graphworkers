@@ -30,6 +30,12 @@ _KNOWN_CHECKSUMS = frozenset({"lei", "isin"})
 # unknown regex_pattern checksum above.
 _KNOWN_RANGE_KINDS = frozenset({"string", "number", "date", "identifier"})
 
+# KG-AC-88 (v15): the closed set of derivation patterns an abstract type's `derived` block may
+# declare. Each decides that type's MINT TRIGGER (KG-AC-90) — see DerivedSpec. Declared
+# EXPLICITLY rather than inferred from the own-property count: inference would mean adding one
+# attribute to a reified-relation type later silently flips its mint semantics.
+_KNOWN_DERIVED_PATTERNS = frozenset({"reified_relation", "attribute_bundle"})
+
 
 class OntologyError(ValueError):
     """Malformed pack, unknown pack, or an invalid hierarchy — always fail loud (KG-AC-14)."""
@@ -41,15 +47,20 @@ class DerivedSpec:
     after extraction, replacing the v13 model-synthesis-and-position-reference mechanism.
     ``identity_from`` is ``"<Type>.<datatypeProperty>"`` — a declared entity type + one of that
     type's declared ``datatype_properties`` — the fact value that becomes the derived instance's
-    identity. ``mint_when`` is a plain declared entity-type name whose presence in the folder
-    triggers minting (no expression grammar — clarify F4: every real case is "this type is
-    present", so none is warranted). ``auto_relations`` lists declared relation types carrying
-    this abstract type in EITHER its domain or its range — clarify F1: a domain-only rule would
-    make `hasCommitment`/`hasCommercialTerms` (abstract type in range only) permanently
-    unproducible. Edge direction needs no separate field: a relation's own domain=src/range=dst
-    already fully determines it, whichever side the abstract type falls on."""
+    identity. ``pattern`` (v15, REQUIRED) is one of ``_KNOWN_DERIVED_PATTERNS`` and decides the
+    MINT TRIGGER — the two are different ontological things: a ``reified_relation`` (no own
+    attributes, several participants) mints when its identity resolves and ≥1 participant is
+    present; an ``attribute_bundle`` (its own attributes, one anchor) mints only when ≥1 of its
+    OWN declared attributes was actually extracted. *(v15 REMOVED ``mint_when``, whose
+    presence-of-anchor trigger minted contentless hubs — an agreement that merely REFERENCES a fee
+    schedule would mint `CommercialTerms` with zero attributes, disproved against a real golden.)*
+    ``auto_relations`` lists declared relation types carrying this abstract type in EITHER its
+    domain or its range — clarify F1: a domain-only rule would make
+    `hasCommitment`/`hasCommercialTerms` (abstract type in range only) permanently unproducible.
+    Edge direction needs no separate field: a relation's own domain=src/range=dst already fully
+    determines it, whichever side the abstract type falls on."""
     identity_from: str
-    mint_when: str
+    pattern: str
     auto_relations: List[str]
 
 
@@ -155,7 +166,7 @@ class Pack:
         """KG-AC-88 (v14): fail loud naming pack + type. ``identity_from`` must reference a
         declared entity type AND one of that type's declared ``datatype_properties`` (exact
         domain match — this pack has no subtype hierarchy to reconcile against, per ADR-0008);
-        ``mint_when`` must reference a declared entity type; every ``auto_relations`` entry must
+        ``pattern`` must be one of ``_KNOWN_DERIVED_PATTERNS``; every ``auto_relations`` entry must
         be a declared relation carrying THIS abstract type in either its domain or its range
         (clarify F1's regression guard — never domain-only)."""
         for et in self.entity_types.values():
@@ -176,9 +187,10 @@ class Pack:
                 raise OntologyError(
                     f"{label}: identity_from '{derived.identity_from}' is not a declared "
                     f"datatype_properties entry with domain '{id_type}'")
-            if derived.mint_when not in self.entity_types:
+            if derived.pattern not in _KNOWN_DERIVED_PATTERNS:
                 raise OntologyError(
-                    f"{label}: mint_when references undeclared type '{derived.mint_when}'")
+                    f"{label}: unknown pattern '{derived.pattern}' "
+                    f"(known: {sorted(_KNOWN_DERIVED_PATTERNS)})")
             for rel_name in derived.auto_relations:
                 rel = self.relations.get(rel_name)
                 if rel is None:
@@ -328,7 +340,7 @@ def load_pack(name_or_path: str) -> Pack:
                 derived=(
                     DerivedSpec(
                         identity_from=e["derived"]["identity_from"],
-                        mint_when=e["derived"]["mint_when"],
+                        pattern=e["derived"]["pattern"],
                         auto_relations=list(e["derived"].get("auto_relations", [])),
                     )
                     if e.get("derived") is not None else None

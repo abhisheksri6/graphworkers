@@ -13,7 +13,7 @@ import re
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 # Layer precedence (ADR-0009 / KG-AC-12; evolve v8 ADR-0012 §2 inserts 'regex'): higher wins on
 # span overlap within a chunk. Order: regex > spaCy > LLM (*amended v11 — the gazetteer tier that
@@ -235,6 +235,17 @@ def compute_entity_uid(
     return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()
 
 
+def compute_derived_entity_uid(folder_id: str, entity_type: str, identity_value: str) -> str:
+    """KG-AC-90 (v15): identity for a DERIVED instance is **structural**, not textual —
+    ``sha256(folder_id|entity_type|identity_value)``. Deliberately excludes chunk, span and
+    occurrence (all of which a derived instance has none of, being document-scoped) and above all
+    excludes any composed NAME: `entity_canonicalization.canonical_key` is
+    ``<entity_type>|<normalized_form>``, so a model-composed name would make the same real-world
+    relationship resolve to different keys across documents and split one canonical hub into two."""
+    parts = [folder_id, entity_type, identity_value]
+    return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()
+
+
 def compute_edge_uid(folder_id: str, relation_type: str, src_entity_uid: str, dst_entity_uid: str) -> str:
     """Deterministic edge identity (KG-AC-10), stable across serial-id churn."""
     parts = [folder_id, relation_type, src_entity_uid, dst_entity_uid]
@@ -308,6 +319,149 @@ def attach_facts_to_entity_records(
             })
         row["attributes"] = attrs
     return entity_rows
+
+
+def _representative_constituents(entity_rows: List[Dict], wanted_types: Sequence[str]) -> List[Dict]:
+    """KG-AC-91(a): collapse mentions to ONE representative per ``(entity_type, normalized_form)``,
+    chosen deterministically as the earliest ``(source_doc_id, source_chunk_id, span_start)``.
+    Stage 1 emits one row per occurrence (KG-AC-63) and ``merge_candidates`` only collapses
+    span-overlaps within a chunk, so without this a hub would fan out to every mention — five
+    mentions, five duplicate edges, a cardinality nothing else in the system produces."""
+    wanted = set(wanted_types)
+    best: Dict[Tuple[str, str], Tuple[Tuple, Dict]] = {}
+    for row in entity_rows:
+        if row.get("entity_type") not in wanted:
+            continue
+        key = (row["entity_type"], normalize_ws(row.get("surface_form")))
+        # None sorts last within each component — a located mention always beats a span-less one.
+        order = (
+            (row.get("source_doc_id") is None, row.get("source_doc_id") or ""),
+            (row.get("source_chunk_id") is None, row.get("source_chunk_id") or ""),
+            (row.get("span_start") is None, row.get("span_start") or 0),
+        )
+        if key not in best or order < best[key][0]:
+            best[key] = (order, row)
+    return [row for _order, row in best.values()]
+
+
+def derive_abstract_entities(
+    folder_id: str, entity_rows: List[Dict], pack, ontology_pack: str, ontology_version: str,
+) -> Tuple[List[Dict], List[Dict], Dict[str, int]]:
+    """KG-AC-90/91 (v15): mint pack-declared abstract types DETERMINISTICALLY after extraction and
+    attach their definitional edges. Runs AFTER ``attach_facts_to_entity_records`` (the identity
+    value IS a fact) and BEFORE ``build_edge_records``.
+
+    Mint trigger is **pattern-specific** — v14's presence-of-anchor test minted contentless hubs
+    (an agreement merely REFERENCING a fee schedule minted `CommercialTerms` with zero attributes,
+    disproved against a real golden):
+      * ``reified_relation``  — identity resolves AND ≥1 auto_relation participant is present.
+      * ``attribute_bundle``  — identity resolves AND ≥1 of its OWN datatype_properties was
+        extracted (those arrive via KG-AC-93's anchoring, R2; before that they never mint, which
+        is the correct outcome for a document that only references them).
+
+    Returns ``(derived_rows, derived_edges, counters)``. Edges are returned as row dicts already
+    keyed by ``entity_uid`` — a derived instance is document-scoped with ``source_chunk_id=None``,
+    so it cannot be resolved through ``entity_uid_key_map``'s ``(chunk, type, surface)`` lookup."""
+    derived_rows: List[Dict] = []
+    derived_edges: List[Dict] = []
+    counters = {"underivable_entity_count": 0, "ambiguous_attachment_count": 0}
+
+    for etype, et in pack.entity_types.items():
+        spec = et.derived
+        if spec is None:
+            continue
+        anchor_type, _, id_prop = spec.identity_from.partition(".")
+        own_props = {p.property for p in pack.datatype_properties.values() if p.domain == etype}
+
+        # identity: every distinct value of the anchor's identity property present in this folder
+        identity_values: List[str] = []
+        for row in entity_rows:
+            if row.get("entity_type") != anchor_type:
+                continue
+            for attr in row.get("attributes") or []:
+                if attr.get("property") == id_prop and attr.get("value"):
+                    value = attr["value"]
+                    if value not in identity_values:
+                        identity_values.append(value)
+
+        # content test (the v15 mint trigger)
+        if spec.pattern == "attribute_bundle":
+            has_content = any(
+                (attr.get("property") in own_props)
+                for row in entity_rows for attr in (row.get("attributes") or [])
+            )
+        else:  # reified_relation
+            # A participant only counts if it is NEITHER the hub itself NOR the identity anchor.
+            # The anchor's presence is already required for identity to resolve, so counting it
+            # again would make this test vacuous — `governedBy` puts `Agreement` in
+            # InvestmentRelationship's participant set, and an agreement alone would then mint a
+            # relationship with no parties, which is exactly v14's contentless-hub defect wearing
+            # a different hat. Found by this task's own test, not by review.
+            participant_types = set()
+            for rel_name in spec.auto_relations:
+                rel = pack.relations.get(rel_name)
+                if rel is None:
+                    continue
+                participant_types |= {
+                    t for t in list(rel.domain) + list(rel.range)
+                    if t != etype and t != anchor_type
+                }
+            has_content = any(r.get("entity_type") in participant_types for r in entity_rows)
+
+        if not has_content:
+            continue  # nothing to represent — never mint a contentless hub (the v14 defect)
+        if not identity_values:
+            counters["underivable_entity_count"] += 1  # content but no identity: skip, never guess
+            continue
+
+        for value in identity_values:
+            derived_rows.append({
+                "entity_uid": compute_derived_entity_uid(folder_id, etype, value),
+                "entity_type": etype,
+                "surface_form": value,           # the identity value itself, NEVER a composed name
+                "source_chunk_id": None,          # document-scoped, not chunk-scoped
+                "source_doc_id": None, "page": None,
+                "is_abstract": True,
+                "span_start": None, "span_end": None,
+                "occurrence_idx": 0,
+                "confidence": 1.0,                # deterministic entailment, not a model guess
+                "extractor": "derived",           # KG-AC-92: distinguishable from source-grounded
+                "ontology_pack": ontology_pack,
+                "ontology_version": ontology_version,
+                "model_id": None,
+                "stage": "staged",
+                "attributes": [],
+            })
+
+        # KG-AC-91(b): >1 hub of this type ⇒ the hub↔constituent pairing is not determinable from
+        # the ontology alone, so attach NOTHING and count — the hubs still exist, a pairing is
+        # never invented.
+        if len(identity_values) > 1:
+            counters["ambiguous_attachment_count"] += len(spec.auto_relations)
+            continue
+
+        hub_uid = derived_rows[-1]["entity_uid"]
+        for rel_name in spec.auto_relations:
+            rel = pack.relations.get(rel_name)
+            if rel is None:
+                continue
+            hub_is_domain = etype in rel.domain
+            other_types = list(rel.range) if hub_is_domain else list(rel.domain)
+            for other in _representative_constituents(entity_rows, other_types):
+                src_uid, dst_uid = ((hub_uid, other["entity_uid"]) if hub_is_domain
+                                    else (other["entity_uid"], hub_uid))
+                derived_edges.append({
+                    "edge_uid": compute_edge_uid(folder_id, rel_name, src_uid, dst_uid),
+                    "relation_type": rel_name,
+                    "src_entity_uid": src_uid, "dst_entity_uid": dst_uid,
+                    # KG-AC-92: no sentence asserts a derived edge DIRECTLY, so no quote is
+                    # fabricated; the constituent's own provenance keeps it traceable.
+                    "evidence_text": None,
+                    "source_doc_id": other.get("source_doc_id"), "page": other.get("page"),
+                    "confidence": 1.0,
+                    "extractor": "derived",
+                })
+    return derived_rows, derived_edges, counters
 
 
 def build_edge_records(

@@ -49,8 +49,23 @@ def _preview(config_dict=None, llm_client=None):
 @pytest.mark.ac("KG-AC-75")
 def test_relations_carry_evidence_text():
     out = _preview()
-    assert len(out["relations"]) == 1
-    assert out["relations"][0]["evidence_text"] == "Acme Investor is Acme LLC."
+    # v15: the preview now also carries DERIVED edges (this sample has an Agreement with an
+    # agreementId plus parties, so a hub is minted and attached) -- assert on the MODEL-emitted
+    # relation specifically rather than on a total count, which is what this AC is about.
+    model_rel = next(r for r in out["relations"] if r["relation_type"] == "hasLegalEntity")
+    assert model_rel["evidence_text"] == "Acme Investor is Acme LLC."
+
+
+@pytest.mark.ac("KG-AC-91")
+def test_preview_shows_derived_edges_end_to_end():
+    # end-to-end proof that the derivation pass is wired into run_pipeline (not just unit-tested):
+    # a derived hub reaches the preview with its definitional edges and no fabricated evidence.
+    out = _preview()
+    derived_edges = [r for r in out["relations"] if r["evidence_text"] is None]
+    assert derived_edges, "derived edges must reach the preview"
+    assert any(r["relation_type"] == "governedBy" for r in derived_edges)
+    hub = next(e for e in out["entities"] if e["entity_type"] == "InvestmentRelationship")
+    assert hub["surface_form"] == "IMA-2025-018"  # identity value, never a composed name
 
 
 @pytest.mark.ac("KG-AC-75")

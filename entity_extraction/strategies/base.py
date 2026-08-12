@@ -28,7 +28,8 @@ from typing import Any, List, Optional, Tuple
 from candidate_pairs import enumerate_candidate_pairs
 from core import (
     Candidate, Fact, Relation, assign_occurrence_indices, attach_facts_to_entity_records,
-    build_edge_records, build_entity_records, build_summary, entity_uid_key_map, evidence_grounded,
+    build_edge_records, build_entity_records, build_summary, derive_abstract_entities,
+    entity_uid_key_map, evidence_grounded,
     filter_bare_pronouns, merge_candidates, merge_edge_records, vote_relations,
 )
 
@@ -331,6 +332,14 @@ def run_pipeline(chunks: List[Chunk], config: ExtractionConfig, pack, *, folder_
     kept_facts, unmapped_property, ungrounded_fact = validate_facts(raw_facts, pack, chunk_text_by_id)
     attach_facts_to_entity_records(ent_rows, kept_facts, chunk_provenance)
 
+    # KG-AC-90/91 (v15): mint pack-declared abstract types deterministically. Placed HERE by
+    # contract, not convenience — strictly AFTER attach_facts_to_entity_records (the identity value
+    # IS a fact, so nothing is derivable before facts land) and BEFORE build_edge_records (the
+    # derived rows must be in ent_rows for their edges to survive the dangling-endpoint drop).
+    derived_rows, derived_edges, derived_counters = derive_abstract_entities(
+        folder_id, ent_rows, pack, config.ontology_pack, pack.version)
+    ent_rows = ent_rows + derived_rows
+
     # KG-AC-67 (evolve v12): self-consistency voting needs the deterministic rules-layer relations
     # (already run ONCE, inside run_graph_extraction) kept SEPARATE from the active LLM relation
     # mode's own output — rules relations are exempt from voting and must never be multiplied by k.
@@ -409,7 +418,11 @@ def run_pipeline(chunks: List[Chunk], config: ExtractionConfig, pack, *, folder_
     relations, ungrounded = validate_relations(raw_relations, pack, chunk_text_by_id)
     edge_rows = build_edge_records(folder_id, relations, entity_uid_key_map(ent_rows),
                                    chunk_provenance=chunk_provenance)
-    edge_rows = merge_edge_records(edge_rows)  # KG-AC-56 (evolve v8) — union+dedup multi-source relations
+    # KG-AC-91: derived edges are already keyed by entity_uid — a derived instance is
+    # document-scoped (`source_chunk_id=None`) so it cannot be resolved through
+    # entity_uid_key_map's (chunk, type, surface) lookup. Appended, then deduped alongside the
+    # model's own edges by the existing merge.
+    edge_rows = merge_edge_records(edge_rows + derived_edges)  # KG-AC-56 (v8) — union+dedup
 
     summary = build_summary(ent_rows, edge_rows, config.ontology_pack, pack.version,
                             unmapped, config.promote_top_n, ungrounded_relation_count=ungrounded,
