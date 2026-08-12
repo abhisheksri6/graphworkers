@@ -170,7 +170,7 @@ def _rows_for_canonical_triple(
     relationship (KG-AC-38-style cross-run reuse) is reflected correctly, not just this batch's rows.
     Stable order (by id) so aggregate_edge_group's evidence tie-break is deterministic."""
     cur.execute(
-        """SELECT ed.folder_id, ed.confidence, ed.evidence_text
+        """SELECT ed.folder_id, ed.confidence, ed.evidence_text, ed.source_doc_id
              FROM public.kg_edges ed
              JOIN public.kg_entities se ON se.entity_uid = ed.src_entity_uid
              JOIN public.kg_entities de ON de.entity_uid = ed.dst_entity_uid
@@ -179,7 +179,8 @@ def _rows_for_canonical_triple(
         (src_canonical_id, relation_type, dst_canonical_id),
     )
     return [
-        {"folder_id": r[0], "confidence": float(r[1]) if r[1] is not None else None, "evidence_text": r[2]}
+        {"folder_id": r[0], "confidence": float(r[1]) if r[1] is not None else None,
+         "evidence_text": r[2], "source_doc_id": r[3]}
         for r in cur.fetchall()
     ]
 
@@ -189,13 +190,15 @@ def _upsert_canonical_edge(
 ) -> None:
     cur.execute(
         """INSERT INTO public.kg_canonical_edges
-               (src_canonical_id, relation_type, dst_canonical_id, support_count, confidence, evidence_text)
-           VALUES (%s, %s, %s, %s, %s, %s)
+               (src_canonical_id, relation_type, dst_canonical_id, support_count, confidence,
+                evidence_text, source_doc_ids)
+           VALUES (%s, %s, %s, %s, %s, %s, %s)
            ON CONFLICT (src_canonical_id, relation_type, dst_canonical_id) DO UPDATE SET
                support_count = EXCLUDED.support_count, confidence = EXCLUDED.confidence,
-               evidence_text = EXCLUDED.evidence_text, updated_at = now()""",
+               evidence_text = EXCLUDED.evidence_text, source_doc_ids = EXCLUDED.source_doc_ids,
+               updated_at = now()""",
         (src_canonical_id, relation_type, dst_canonical_id,
-         agg["support_count"], agg["confidence"], agg["evidence_text"]),
+         agg["support_count"], agg["confidence"], agg["evidence_text"], Json(agg["source_doc_ids"])),
     )
 
 

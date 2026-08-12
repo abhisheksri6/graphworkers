@@ -188,24 +188,25 @@ def choose_canonical_name(mentions: List[Mention]) -> Tuple[str, List[str]]:
 
 
 def merge_attributes(mentions_attrs: Sequence[Sequence[Dict[str, Any]]]) -> Dict[str, List[Dict[str, Any]]]:
-    """KG-AC-78: merge facts across a canonicalised cluster's mentions, NEVER last-write-wins.
+    """KG-AC-78/80: merge facts across a canonicalised cluster's mentions, NEVER last-write-wins.
     ``mentions_attrs`` is one ``kg_entities.attributes`` list per mention (the
     ``{property, value, normalized_value, evidence, source_doc_id, page}`` shape
     ``attach_facts_to_entity_records`` already writes — no new shape invented).
 
     Groups by ``property``, then by ``normalized_value`` (the equality key, not raw ``value`` —
     mirrors KG-AC-70's own normalize-before-compare distinction: "15 March 2025" and "2025-03-15"
-    are the same fact). One distinct value ⇒ ONE merged entry, ``conflicting=False``, its
-    ``provenance`` list carrying every contributing source (deduplicated on exact
-    (source_doc_id, page, evidence) repeats, so a re-extracted duplicate mention doesn't pad the
-    list). Two or more distinct values ⇒ EVERY entry for that property is retained —
-    ``conflicting=True`` on each — with provenance scoped to only the mentions that asserted THAT
-    value; nothing is dropped, nothing is chosen as "the" answer.
-
-    Deliberately builds no ``single_source``/``consistent`` distinction here — that needs counting
-    DISTINCT SOURCE DOCUMENTS, which is KG-AC-80's own stated scope (P13), not this task's. Each
-    entry's ``provenance`` list is already complete, so P13 extends this shape additively (reads
-    the same list, adds the finer status) rather than reworking it."""
+    are the same fact). Each entry's ``provenance`` list carries every contributing source
+    (deduplicated on exact (source_doc_id, page, evidence) repeats, so a re-extracted duplicate
+    mention doesn't pad the list) and a **status** (KG-AC-80, the full 3-state vocabulary):
+      - ``conflicting`` — TWO OR MORE distinct normalized values exist for this property, however
+        lopsided the split (clarify 2026-08-11, baked into the AC text) — EVERY entry is retained,
+        each scoped to only the mentions that asserted THAT value; nothing is dropped, nothing is
+        chosen as "the" answer.
+      - ``single_source`` — exactly one distinct value, asserted by only ONE distinct source
+        document (0 known documents also defaults here — never invents a 4th status).
+      - ``consistent`` — exactly one distinct value, asserted by TWO OR MORE distinct source
+        documents, all agreeing. Deliberately NOT used for the single-document case, which would
+        overstate the evidence of one unchallenged reading (KG-AC-80's own stated rationale)."""
     # property -> normalized_value -> [source facts]
     by_property: Dict[str, Dict[str, List[Dict[str, Any]]]] = {}
     for attrs in mentions_attrs:
@@ -228,9 +229,14 @@ def merge_attributes(mentions_attrs: Sequence[Sequence[Dict[str, Any]]]) -> Dict
                 seen_prov.add(key)
                 provenance.append({"source_doc_id": f.get("source_doc_id"), "page": f.get("page"),
                                    "evidence": f.get("evidence")})
+            if conflicting:
+                status = "conflicting"
+            else:
+                distinct_docs = {p["source_doc_id"] for p in provenance if p["source_doc_id"]}
+                status = "consistent" if len(distinct_docs) >= 2 else "single_source"
             entries.append({
                 "value": facts[0]["value"], "normalized_value": nval,
-                "conflicting": conflicting, "provenance": provenance,
+                "status": status, "provenance": provenance,
             })
         merged[prop] = entries
     return merged
@@ -249,19 +255,25 @@ def reconcile_type(types: Sequence[str], pack) -> Optional[str]:
 def aggregate_edge_group(rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
     """KG-AC-47: collapse a group of mention-edges that all share ONE canonical
     (src_canonical_id, relation_type, dst_canonical_id) triple into the aggregated canonical edge.
-    ``rows`` are dicts with ``folder_id``/``confidence``/``evidence_text`` — the caller (store.py)
-    groups raw kg_edges rows by triple before calling this. Pure/deterministic given a fixed,
-    stably-ordered input:
+    ``rows`` are dicts with ``folder_id``/``confidence``/``evidence_text``/``source_doc_id`` — the
+    caller (store.py) groups raw kg_edges rows by triple before calling this. Pure/deterministic
+    given a fixed, stably-ordered input:
       - ``support_count`` = the number of DISTINCT source documents (folder_ids) asserting it —
         not the raw mention-edge count (a document repeating the same relation counts once).
       - ``confidence`` = the max across contributing edges (None if none carry one).
       - ``evidence_text`` = the top-3 sentences by confidence, descending; ties keep the input's
         relative order (stable sort). A row with no evidence_text is never selected (evidence is
-        mandatory upstream, KG-AC-46 — defensive here, not expected to occur)."""
+        mandatory upstream, KG-AC-46 — defensive here, not expected to occur).
+      - ``source_doc_ids`` (KG-AC-80, v13) = the sorted, deduplicated set of ``source_doc_id``
+        values across contributing rows (``None`` never enters the set) — the canonical edge's own
+        contributing-document set, DELIBERATELY on a different basis than ``support_count``
+        (folder_id, unchanged from KG-AC-47) — a folder and a document are not the same concept."""
     support_count = len({r["folder_id"] for r in rows if r.get("folder_id")})
     confidences = [r["confidence"] for r in rows if r.get("confidence") is not None]
     confidence = max(confidences) if confidences else None
     with_evidence = [r for r in rows if r.get("evidence_text")]
     ranked = sorted(with_evidence, key=lambda r: -(r["confidence"] or 0.0))
     evidence_text = [r["evidence_text"] for r in ranked[:3]]
-    return {"support_count": support_count, "confidence": confidence, "evidence_text": evidence_text}
+    source_doc_ids = sorted({r["source_doc_id"] for r in rows if r.get("source_doc_id")})
+    return {"support_count": support_count, "confidence": confidence, "evidence_text": evidence_text,
+           "source_doc_ids": source_doc_ids}

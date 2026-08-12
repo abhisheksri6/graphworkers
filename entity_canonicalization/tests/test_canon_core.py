@@ -135,4 +135,40 @@ def test_aggregate_edge_group_evidence_is_top_3_by_confidence():
 @pytest.mark.ac("KG-AC-47")
 def test_aggregate_edge_group_empty_input():
     agg = aggregate_edge_group([])
-    assert agg == {"support_count": 0, "confidence": None, "evidence_text": []}
+    assert agg == {"support_count": 0, "confidence": None, "evidence_text": [], "source_doc_ids": []}
+
+
+# ---- P13 (KG-AC-80): canonical edges expose their contributing document set --------------------
+@pytest.mark.ac("KG-AC-80")
+def test_aggregate_edge_group_source_doc_ids_deduplicated_and_sorted():
+    rows = [
+        {"folder_id": "f1", "confidence": 0.6, "evidence_text": "a", "source_doc_id": "docB"},
+        {"folder_id": "f1", "confidence": 0.7, "evidence_text": "b", "source_doc_id": "docB"},  # dup
+        {"folder_id": "f2", "confidence": 0.5, "evidence_text": "c", "source_doc_id": "docA"},
+    ]
+    agg = aggregate_edge_group(rows)
+    assert agg["source_doc_ids"] == ["docA", "docB"]  # deduplicated, deterministically ordered
+
+
+@pytest.mark.ac("KG-AC-80")
+def test_aggregate_edge_group_source_doc_ids_alongside_support_count():
+    # source_doc_ids and support_count are DELIBERATELY independent (support_count stays folder_id
+    # -based, unchanged from KG-AC-47) -- this test asserts both are present and correct together,
+    # not that they must agree numerically.
+    rows = [
+        {"folder_id": "f1", "confidence": 0.6, "evidence_text": "a", "source_doc_id": "docA"},
+        {"folder_id": "f2", "confidence": 0.5, "evidence_text": "b", "source_doc_id": "docA"},
+    ]
+    agg = aggregate_edge_group(rows)
+    assert agg["support_count"] == 2  # two distinct FOLDERS
+    assert agg["source_doc_ids"] == ["docA"]  # one distinct DOCUMENT
+
+
+@pytest.mark.ac("KG-AC-80")
+def test_aggregate_edge_group_missing_source_doc_id_excluded_not_a_null_entry():
+    rows = [
+        {"folder_id": "f1", "confidence": 0.6, "evidence_text": "a", "source_doc_id": "docA"},
+        {"folder_id": "f2", "confidence": 0.5, "evidence_text": "b", "source_doc_id": None},
+    ]
+    agg = aggregate_edge_group(rows)
+    assert agg["source_doc_ids"] == ["docA"]  # None never enters the set

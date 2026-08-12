@@ -233,14 +233,14 @@ def test_attributes_merge_with_conflict_retention_across_documents(conn):
 
         with conn.cursor() as cur:
             attrs = _canonical_attributes(cur, "organization:acme")
-        # agreeing fact collapses, BOTH sources present
+        # agreeing fact collapses, BOTH sources present -> consistent (2 distinct docs)
         assert len(attrs["governingLaw"]) == 1
-        assert attrs["governingLaw"][0]["conflicting"] is False
+        assert attrs["governingLaw"][0]["status"] == "consistent"
         docs = {p["source_doc_id"] for p in attrs["governingLaw"][0]["provenance"]}
         assert docs == {"docA", "docB"}
-        # single-mention property still merges cleanly (no conflict, one source)
+        # single-mention property still merges cleanly -> single_source (1 distinct doc, docB only)
         assert len(attrs["effectiveDate"]) == 1
-        assert attrs["effectiveDate"][0]["conflicting"] is False
+        assert attrs["effectiveDate"][0]["status"] == "single_source"
     finally:
         _cleanup(conn, [fa], ["organization:acme"])
 
@@ -273,7 +273,7 @@ def test_conflicting_attributes_across_a_cross_run_merge(conn):
             attrs = _canonical_attributes(cur, "organization:acme")
         entries = attrs["effectiveDate"]
         assert len(entries) == 2  # NEITHER document's value overwritten
-        assert all(e["conflicting"] is True for e in entries)
+        assert all(e["status"] == "conflicting" for e in entries)
         assert {e["normalized_value"] for e in entries} == {"2025-03-15", "2025-03-20"}
     finally:
         _cleanup(conn, [f1, f2], ["organization:acme"])
