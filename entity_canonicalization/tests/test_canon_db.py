@@ -126,7 +126,7 @@ def test_batch_collapses_dupes_single_instance_and_scoped(conn):
         conn.commit()
         assert summary2 == {"canonical_count": 0, "merged_count": 0, "minted_count": 0}
     finally:
-        _cleanup(conn, [fa, fb, fc], ["InvestmentAdviser|acme", "Organization|acme", "Organization|globex"])
+        _cleanup(conn, [fa, fb, fc], ["investmentadviser:acme", "organization:acme", "organization:globex"])
 
 
 @pytest.mark.ac("KG-AC-38")
@@ -153,7 +153,7 @@ def test_cross_run_reuses_existing_canonical(conn):
             cid2 = _rows(cur, f2)[0][2]
         assert cid2 == cid1  # the two become one graph node across runs
     finally:
-        _cleanup(conn, [f1, f2], ["Organization|acme"])
+        _cleanup(conn, [f1, f2], ["organization:acme"])
 
 
 @pytest.mark.ac("KG-AC-76")
@@ -169,12 +169,12 @@ def test_canonical_name_and_aliases_written_on_mint(conn):
         conn.commit()
 
         with conn.cursor() as cur:
-            name, aliases = _canonical_row(cur, "Organization|acme")
+            name, aliases = _canonical_row(cur, "organization:acme")
         assert name == "Acme Corporation"  # longest complete surface
         assert set(aliases) == {"Acme", "Acme Corp"}
         assert "Acme Corporation" not in aliases
     finally:
-        _cleanup(conn, [fa], ["Organization|acme"])
+        _cleanup(conn, [fa], ["organization:acme"])
 
 
 @pytest.mark.ac("KG-AC-77")
@@ -190,7 +190,7 @@ def test_aliases_grow_across_a_cross_run_merge(conn):
         canonicalize_batch(_DbShim(conn), [f1], pack=FIBO)
         conn.commit()
         with conn.cursor() as cur:
-            name1, aliases1 = _canonical_row(cur, "Organization|acme")
+            name1, aliases1 = _canonical_row(cur, "organization:acme")
         assert name1 == "Acme Corp" and aliases1 == []
 
         with conn.cursor() as cur:
@@ -200,13 +200,13 @@ def test_aliases_grow_across_a_cross_run_merge(conn):
         conn.commit()
 
         with conn.cursor() as cur:
-            name2, aliases2 = _canonical_row(cur, "Organization|acme")
+            name2, aliases2 = _canonical_row(cur, "organization:acme")
         # the longer surface from the LATER batch now wins the display name...
         assert name2 == "Acme Corporation"
         # ...and the founding batch's surface is preserved as an alias, not dropped.
         assert aliases2 == ["Acme Corp"]
     finally:
-        _cleanup(conn, [f1, f2], ["Organization|acme"])
+        _cleanup(conn, [f1, f2], ["organization:acme"])
 
 
 @pytest.mark.ac("KG-AC-78")
@@ -232,7 +232,7 @@ def test_attributes_merge_with_conflict_retention_across_documents(conn):
         conn.commit()
 
         with conn.cursor() as cur:
-            attrs = _canonical_attributes(cur, "Organization|acme")
+            attrs = _canonical_attributes(cur, "organization:acme")
         # agreeing fact collapses, BOTH sources present
         assert len(attrs["governingLaw"]) == 1
         assert attrs["governingLaw"][0]["conflicting"] is False
@@ -242,7 +242,7 @@ def test_attributes_merge_with_conflict_retention_across_documents(conn):
         assert len(attrs["effectiveDate"]) == 1
         assert attrs["effectiveDate"][0]["conflicting"] is False
     finally:
-        _cleanup(conn, [fa], ["Organization|acme"])
+        _cleanup(conn, [fa], ["organization:acme"])
 
 
 @pytest.mark.ac("KG-AC-78")
@@ -270,13 +270,53 @@ def test_conflicting_attributes_across_a_cross_run_merge(conn):
         conn.commit()
 
         with conn.cursor() as cur:
-            attrs = _canonical_attributes(cur, "Organization|acme")
+            attrs = _canonical_attributes(cur, "organization:acme")
         entries = attrs["effectiveDate"]
         assert len(entries) == 2  # NEITHER document's value overwritten
         assert all(e["conflicting"] is True for e in entries)
         assert {e["normalized_value"] for e in entries} == {"2025-03-15", "2025-03-20"}
     finally:
-        _cleanup(conn, [f1, f2], ["Organization|acme"])
+        _cleanup(conn, [f1, f2], ["organization:acme"])
+
+
+@pytest.mark.ac("KG-AC-79")
+def test_resolve_or_mint_collision_gets_a_deterministic_suffix_not_a_wrong_reuse(conn):
+    # slugify collapses ANY run of non-alnum to one "-", so two genuinely DIFFERENT
+    # normalized_form values can slug identically (e.g. differing only in punctuation style) even
+    # though normalize_surface's own output rarely produces this in practice. _resolve_or_mint must
+    # retry with KG-AC-79's suffix rather than silently reusing the FIRST cluster's canonical_id for
+    # a SECOND, unrelated real-world entity -- exactly the defect this AC's collision rule exists
+    # to prevent.
+    from store import _resolve_or_mint
+    try:
+        with conn.cursor() as cur:
+            cid1, minted1 = _resolve_or_mint(cur, "Organization", "acme!!!corp")
+            cid2, minted2 = _resolve_or_mint(cur, "Organization", "acme---corp")
+        conn.commit()
+        assert minted1 is True and minted2 is True  # BOTH are novel mints, not a false merge
+        assert cid1 != cid2  # two DISTINCT real clusters, never collapsed into one
+
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT canonical_key FROM public.kg_canonical_entities WHERE canonical_id IN (%s,%s) ORDER BY canonical_key",
+                (cid1, cid2),
+            )
+            keys = [r[0] for r in cur.fetchall()]
+        assert keys == ["organization:acme-corp", "organization:acme-corp-1"]
+
+        # re-resolving EITHER original normalized_form must land on its OWN existing row, not mint
+        # a third row and not cross-wire to the other cluster.
+        with conn.cursor() as cur:
+            cid1_again, minted_again = _resolve_or_mint(cur, "Organization", "acme!!!corp")
+        conn.commit()
+        assert minted_again is False and cid1_again == cid1
+    finally:
+        with conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM public.kg_canonical_entities WHERE canonical_key IN (%s,%s)",
+                ("organization:acme-corp", "organization:acme-corp-1"),
+            )
+        conn.commit()
 
 
 @pytest.mark.ac("KG-AC-40")

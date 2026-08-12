@@ -126,7 +126,7 @@ def test_duplicate_canonical_edges_collapse_with_aggregation(conn):
         assert float(confidence) == pytest.approx(0.9)  # max
         assert set(evidence_text) == {"fa sentence", "fb sentence"}  # both fit in top-3
     finally:
-        _cleanup(conn, [fa, fb], ["Organization|acme", "Bond|acme bond"])
+        _cleanup(conn, [fa, fb], ["organization:acme", "bond:acme-bond"])
 
 
 @pytest.mark.ac("KG-AC-47")

@@ -30,7 +30,9 @@ def test_normalize_strips_legal_suffixes_and_punct():
 @pytest.mark.ac("KG-AC-22")
 def test_canonical_key_is_always_type_normalized():
     # v11: canonical_key no longer accepts an external_id short-circuit.
-    assert canonical_key("Bank", "acme") == "Bank|acme"
+    # v13 (KG-AC-79): the pipe-delimited format is superseded by a human-readable slug — see
+    # test_canonical_key.py for the full KG-AC-79 test suite.
+    assert canonical_key("Bank", "acme") == "bank:acme"
 
 
 # ---- three-band match (KG-AC-24, amended v11) -----------------------------

@@ -48,12 +48,36 @@ def normalize_surface(surface: str) -> str:
     return " ".join(tokens)
 
 
-def canonical_key(entity_type: str, normalized_form: str) -> str:
-    """The UNIQUE key on kg_canonical_entities: ``<reconciled_type>|<normalized_form>`` (*amended
-    v11 — the LEI-authoritative-key short-circuit is removed with the gazetteer/external-id
-    plane*). Uses the RECONCILED cluster type so chunk-boundary type inconsistency (F-CHUNK-2)
-    doesn't split one real entity."""
-    return f"{entity_type}|{normalized_form}"
+def slugify(s: str) -> str:
+    """Lowercase; collapse any run of non-alphanumeric characters to a single ``-``; strip leading/
+    trailing ``-``. Pure string transform, no normalization semantics of its own (that is
+    normalize_surface's job) — used to make an already-normalized string human-readable/URL-safe."""
+    s = re.sub(r"[^a-z0-9]+", "-", (s or "").lower())
+    return s.strip("-")
+
+
+def canonical_key(entity_type: str, normalized_form: str, suffix: int = 0) -> str:
+    """KG-AC-79 (v13 — amends the v11 pipe-delimited format): the UNIQUE key on
+    kg_canonical_entities, now a deterministic, human-readable ``<entity-type-slug>:
+    <canonical-name-slug>`` identifier — "the addressable, exportable identity" (the AC's own
+    words); ``canonical_id`` (a UUID) remains the actual storage key.
+
+    Built from ``normalized_form``, NOT the `canonical_name` column P10 writes (full reasoning in
+    `test_canonical_key.py`'s module docstring): `canonical_name` is deliberately mutable across
+    cross-run merges (P10), which would contradict this AC's own "stable across runs" requirement
+    in the same sentence, and creates a chicken-and-egg problem (`_resolve_or_mint` needs this key
+    BEFORE `canonical_name` exists). `normalized_form` has neither problem and is the SAME basis
+    `canonical_key` already used before this task — only the output format changes.
+
+    Uses the RECONCILED cluster type so chunk-boundary type inconsistency (F-CHUNK-2) doesn't split
+    one real entity (unchanged from the prior format).
+
+    ``suffix`` (KG-AC-79's collision requirement): 0 omits it; >0 appends ``-<suffix>``,
+    deterministically — store.py's `_resolve_or_mint` increments it only when a computed key
+    already belongs to a DIFFERENT normalized_form (a genuine slug collision), never for a
+    legitimate cross-run match (KG-AC-38, same normalized_form reusing the same key)."""
+    key = f"{slugify(entity_type)}:{slugify(normalized_form)}"
+    return f"{key}-{suffix}" if suffix else key
 
 
 def fuzzy_score(a: str, b: str) -> float:

@@ -52,25 +52,36 @@ def read_staged_mentions(cur, folder_ids: Sequence[str]) -> List[Mention]:
     return out
 
 
-def _resolve_or_mint(cur, key: str, entity_type: str, normalized_form: str) -> Tuple[str, bool]:
-    """Race-safe resolve-or-mint (KG-AC-38): INSERT ON CONFLICT DO NOTHING RETURNING mints a novel
-    canonical; on conflict (existing key, incl. a prior batch's) SELECT the existing id. Returns
-    (canonical_id, was_minted)."""
-    cur.execute(
-        """INSERT INTO public.kg_canonical_entities
-               (canonical_key, entity_type, normalized_form)
-           VALUES (%s, %s, %s)
-           ON CONFLICT (canonical_key) DO NOTHING
-           RETURNING canonical_id""",
-        (key, entity_type, normalized_form),
-    )
-    row = cur.fetchone()
-    if row is not None:
-        return str(row[0]), True
-    cur.execute(
-        "SELECT canonical_id FROM public.kg_canonical_entities WHERE canonical_key = %s", (key,)
-    )
-    return str(cur.fetchone()[0]), False
+def _resolve_or_mint(cur, entity_type: str, normalized_form: str) -> Tuple[str, bool]:
+    """Race-safe resolve-or-mint (KG-AC-38, key format amended KG-AC-79): INSERT ON CONFLICT DO
+    NOTHING RETURNING mints a novel canonical; on conflict, distinguish a LEGITIMATE cross-run
+    match (existing row has the SAME normalized_form — reuse it, KG-AC-38) from a genuine SLUG
+    COLLISION (existing row has a DIFFERENT normalized_form — two distinct real clusters whose
+    human-readable keys happened to collide) — the latter retries with KG-AC-79's deterministic
+    suffix (-2, -3, ...) rather than incorrectly reusing an unrelated entity's canonical_id.
+    Returns (canonical_id, was_minted)."""
+    suffix = 0
+    while True:
+        key = canonical_key(entity_type, normalized_form, suffix)
+        cur.execute(
+            """INSERT INTO public.kg_canonical_entities
+                   (canonical_key, entity_type, normalized_form)
+               VALUES (%s, %s, %s)
+               ON CONFLICT (canonical_key) DO NOTHING
+               RETURNING canonical_id""",
+            (key, entity_type, normalized_form),
+        )
+        row = cur.fetchone()
+        if row is not None:
+            return str(row[0]), True
+        cur.execute(
+            "SELECT canonical_id, normalized_form FROM public.kg_canonical_entities WHERE canonical_key = %s",
+            (key,),
+        )
+        existing_id, existing_norm = cur.fetchone()
+        if existing_norm == normalized_form:
+            return str(existing_id), False  # legitimate cross-run reuse (KG-AC-38)
+        suffix += 1  # genuine collision — try the next deterministic suffix
 
 
 def _assign(cur, entity_uids: Sequence[str], canonical_id: str, normalized_form: str) -> None:
@@ -222,8 +233,7 @@ def canonicalize_batch(db, folder_ids: Sequence[str], *, fuzzy_floor: float = _D
         for cluster in clusters:
             rtype = reconcile_type([m.entity_type for m in cluster], pack) if pack else cluster[0].entity_type
             norm = cluster[0].normalized_form
-            key = canonical_key(rtype, norm)
-            cid, was_minted = _resolve_or_mint(cur, key, rtype, norm)
+            cid, was_minted = _resolve_or_mint(cur, rtype, norm)
             minted += 1 if was_minted else 0
             merged += 0 if was_minted else 1
             canonical_ids.add(cid)
