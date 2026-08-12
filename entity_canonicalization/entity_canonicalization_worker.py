@@ -76,13 +76,13 @@ def make_llm_adjudicator(client) -> Callable[[Mention, Mention], bool]:
 
 
 def _resolve_connection_id(cfg: Dict[str, Any]) -> Optional[str]:
-    """KG-AC-35 (amended 2026-08-12): the profile's own `connection_id` always wins when present;
-    otherwise falls back to `settings.default_llm_connection_id` so a new pipeline (which has no
-    node-UI surface to set this today) still gets a working LLM connection for ambiguous-band
-    adjudication, rather than failing loud on its first ambiguous pair. An operator can restore the
-    old fail-loud-when-absent behavior by setting the env var to an empty string -- `or None` at the
-    end keeps that case (and a genuinely blank default) as "no connection", not the string ""."""
-    return cfg.get("connection_id") or settings.default_llm_connection_id or None
+    """KG-AC-35 (amended 2026-08-12, P23 then P24): `settings.default_llm_connection_id` ALWAYS
+    wins, even over a pipeline's own inline `connection_id` -- there is no node-UI surface to set
+    this field today, and every explicit value found in production had it wrong (pointed at a
+    non-Bedrock connection). Falling back to the pipeline's own config only happens if the default
+    itself is blanked (env var set to `""`) -- the escape hatch back to the pre-P24 behavior. `or
+    None` at the end keeps a fully-blanked config as "no connection", not the string ""."""
+    return settings.default_llm_connection_id or cfg.get("connection_id") or None
 
 
 def _no_connection_adjudicator(a: Mention, b: Mention) -> bool:
@@ -113,9 +113,11 @@ def process_batch(task_id, folder_ids: Sequence[str], entity_canonicalization_co
         fuzzy_floor = float(cfg.get("fuzzy_floor", 0.80))
         fuzzy_ceiling = float(cfg.get("fuzzy_ceiling", 0.95))
         connection_id = _resolve_connection_id(cfg)
-        if connection_id and connection_id != cfg.get("connection_id"):
-            logger.info("entity_canonicalization: no connection_id configured, defaulting to %r",
-                       connection_id)
+        configured = cfg.get("connection_id")
+        if connection_id and connection_id != configured:
+            logger.info(
+                "entity_canonicalization: using configured default connection %r (pipeline config "
+                "had %r)", connection_id, configured)
         if adjudicate is None:
             if llm_client is None and connection_id:
                 llm_client = build_llm_client(connection_id)
