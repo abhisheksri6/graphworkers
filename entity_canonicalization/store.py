@@ -16,7 +16,7 @@ from psycopg2.extras import Json
 
 from core import (
     Mention, aggregate_edge_group, canonical_key, choose_canonical_name, cluster_mentions,
-    normalize_surface, reconcile_type,
+    merge_attributes, normalize_surface, reconcile_type,
 )
 
 _DEFAULT_FLOOR = 0.80
@@ -109,6 +109,24 @@ def _update_display_name(cur, canonical_id: str, canonical_name: str, aliases: L
               SET canonical_name = %s, aliases = %s
             WHERE canonical_id = %s""",
         (canonical_name, Json(aliases), canonical_id),
+    )
+
+
+def _attributes_for_canonical(cur, canonical_id: str) -> List[List[Dict[str, Any]]]:
+    """KG-AC-78: every mention's raw ``attributes`` list currently sharing this canonical_id —
+    same full-recompute posture as `_mentions_for_canonical` (P10), so a later document's fact
+    (agreeing OR conflicting) is reflected, not frozen at the founding batch."""
+    cur.execute(
+        "SELECT attributes FROM public.kg_entities WHERE canonical_id = %s ORDER BY id",
+        (canonical_id,),
+    )
+    return [r[0] or [] for r in cur.fetchall()]
+
+
+def _update_attributes(cur, canonical_id: str, merged: Dict[str, List[Dict[str, Any]]]) -> None:
+    cur.execute(
+        "UPDATE public.kg_canonical_entities SET attributes = %s WHERE canonical_id = %s",
+        (Json(merged), canonical_id),
     )
 
 
@@ -217,6 +235,11 @@ def canonicalize_batch(db, folder_ids: Sequence[str], *, fuzzy_floor: float = _D
             full_set = _mentions_for_canonical(cur, cid)
             canonical_name, aliases = choose_canonical_name(full_set)
             _update_display_name(cur, cid, canonical_name, aliases)
+
+            # KG-AC-78: same full-recompute posture — merge facts from every mention now sharing
+            # this canonical_id, never last-write-wins.
+            merged_attrs = merge_attributes(_attributes_for_canonical(cur, cid))
+            _update_attributes(cur, cid, merged_attrs)
 
         # KG-AC-47: aggregate duplicate canonical edges for every triple this batch touches, in the
         # SAME transaction (KG-AC-40 — a failure anywhere above rolls this back too).

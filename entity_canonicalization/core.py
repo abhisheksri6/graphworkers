@@ -163,6 +163,55 @@ def choose_canonical_name(mentions: List[Mention]) -> Tuple[str, List[str]]:
     return canonical_name, aliases
 
 
+def merge_attributes(mentions_attrs: Sequence[Sequence[Dict[str, Any]]]) -> Dict[str, List[Dict[str, Any]]]:
+    """KG-AC-78: merge facts across a canonicalised cluster's mentions, NEVER last-write-wins.
+    ``mentions_attrs`` is one ``kg_entities.attributes`` list per mention (the
+    ``{property, value, normalized_value, evidence, source_doc_id, page}`` shape
+    ``attach_facts_to_entity_records`` already writes — no new shape invented).
+
+    Groups by ``property``, then by ``normalized_value`` (the equality key, not raw ``value`` —
+    mirrors KG-AC-70's own normalize-before-compare distinction: "15 March 2025" and "2025-03-15"
+    are the same fact). One distinct value ⇒ ONE merged entry, ``conflicting=False``, its
+    ``provenance`` list carrying every contributing source (deduplicated on exact
+    (source_doc_id, page, evidence) repeats, so a re-extracted duplicate mention doesn't pad the
+    list). Two or more distinct values ⇒ EVERY entry for that property is retained —
+    ``conflicting=True`` on each — with provenance scoped to only the mentions that asserted THAT
+    value; nothing is dropped, nothing is chosen as "the" answer.
+
+    Deliberately builds no ``single_source``/``consistent`` distinction here — that needs counting
+    DISTINCT SOURCE DOCUMENTS, which is KG-AC-80's own stated scope (P13), not this task's. Each
+    entry's ``provenance`` list is already complete, so P13 extends this shape additively (reads
+    the same list, adds the finer status) rather than reworking it."""
+    # property -> normalized_value -> [source facts]
+    by_property: Dict[str, Dict[str, List[Dict[str, Any]]]] = {}
+    for attrs in mentions_attrs:
+        for fact in attrs:
+            prop = fact["property"]
+            nval = fact.get("normalized_value") or fact["value"]
+            by_property.setdefault(prop, {}).setdefault(nval, []).append(fact)
+
+    merged: Dict[str, List[Dict[str, Any]]] = {}
+    for prop, by_value in by_property.items():
+        conflicting = len(by_value) > 1
+        entries = []
+        for nval, facts in by_value.items():
+            seen_prov: set = set()
+            provenance = []
+            for f in facts:
+                key = (f.get("source_doc_id"), f.get("page"), f.get("evidence"))
+                if key in seen_prov:
+                    continue
+                seen_prov.add(key)
+                provenance.append({"source_doc_id": f.get("source_doc_id"), "page": f.get("page"),
+                                   "evidence": f.get("evidence")})
+            entries.append({
+                "value": facts[0]["value"], "normalized_value": nval,
+                "conflicting": conflicting, "provenance": provenance,
+            })
+        merged[prop] = entries
+    return merged
+
+
 def reconcile_type(types: Sequence[str], pack) -> Optional[str]:
     """KG-AC-23: the most-specific type across a cluster per the pack's declared parent hierarchy
     (a descendant beats its ancestor; cross-branch → declaration order). Falls back to the first

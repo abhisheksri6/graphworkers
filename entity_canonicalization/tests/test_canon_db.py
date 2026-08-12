@@ -44,18 +44,21 @@ def conn():
 
 
 def _seed(cur, folder_id, mentions):
-    """mentions: list of (surface, entity_type) OR (surface, entity_type, source_doc_id)."""
+    """mentions: list of (surface, entity_type) OR (surface, entity_type, source_doc_id) OR
+    (surface, entity_type, source_doc_id, attributes)."""
+    import json as _json
     for i, item in enumerate(mentions):
         surface, etype = item[0], item[1]
         doc_id = item[2] if len(item) > 2 else None
+        attrs = item[3] if len(item) > 3 else []
         uid = f"{folder_id}:{i}"
         cur.execute(
             """INSERT INTO public.kg_entities
-                   (folder_id, entity_uid, entity_type, surface_form, source_doc_id,
+                   (folder_id, entity_uid, entity_type, surface_form, source_doc_id, attributes,
                     ontology_pack, ontology_version, stage)
-               VALUES (%s,%s,%s,%s,%s,'fibo_core','1.0','staged')
+               VALUES (%s,%s,%s,%s,%s,%s,'fibo_core','1.0','staged')
                ON CONFLICT (entity_uid) DO NOTHING""",
-            (folder_id, uid, etype, surface, doc_id),
+            (folder_id, uid, etype, surface, doc_id, _json.dumps(attrs)),
         )
 
 
@@ -66,6 +69,15 @@ def _canonical_row(cur, canonical_key):
     )
     row = cur.fetchone()
     return (row[0], row[1]) if row else (None, None)
+
+
+def _canonical_attributes(cur, canonical_key):
+    cur.execute(
+        "SELECT attributes FROM public.kg_canonical_entities WHERE canonical_key = %s",
+        (canonical_key,),
+    )
+    row = cur.fetchone()
+    return row[0] if row else None
 
 
 def _rows(cur, folder_id):
@@ -193,6 +205,76 @@ def test_aliases_grow_across_a_cross_run_merge(conn):
         assert name2 == "Acme Corporation"
         # ...and the founding batch's surface is preserved as an alias, not dropped.
         assert aliases2 == ["Acme Corp"]
+    finally:
+        _cleanup(conn, [f1, f2], ["Organization|acme"])
+
+
+@pytest.mark.ac("KG-AC-78")
+def test_attributes_merge_with_conflict_retention_across_documents(conn):
+    fa = f"canon-{uuid.uuid4()}"
+    try:
+        with conn.cursor() as cur:
+            _seed(cur, fa, [
+                ("Acme Corp", "Organization", "docA",
+                 [{"property": "governingLaw", "value": "England and Wales",
+                   "normalized_value": "England and Wales", "evidence": "e1",
+                   "source_doc_id": "docA", "page": 1}]),
+                ("Acme Corp", "Organization", "docB",
+                 [{"property": "governingLaw", "value": "England and Wales",
+                   "normalized_value": "England and Wales", "evidence": "e2",
+                   "source_doc_id": "docB", "page": 3},
+                  {"property": "effectiveDate", "value": "20 March 2025",
+                   "normalized_value": "2025-03-20", "evidence": "e3",
+                   "source_doc_id": "docB", "page": 1}]),
+            ])
+        conn.commit()
+        canonicalize_batch(_DbShim(conn), [fa], pack=FIBO)
+        conn.commit()
+
+        with conn.cursor() as cur:
+            attrs = _canonical_attributes(cur, "Organization|acme")
+        # agreeing fact collapses, BOTH sources present
+        assert len(attrs["governingLaw"]) == 1
+        assert attrs["governingLaw"][0]["conflicting"] is False
+        docs = {p["source_doc_id"] for p in attrs["governingLaw"][0]["provenance"]}
+        assert docs == {"docA", "docB"}
+        # single-mention property still merges cleanly (no conflict, one source)
+        assert len(attrs["effectiveDate"]) == 1
+        assert attrs["effectiveDate"][0]["conflicting"] is False
+    finally:
+        _cleanup(conn, [fa], ["Organization|acme"])
+
+
+@pytest.mark.ac("KG-AC-78")
+def test_conflicting_attributes_across_a_cross_run_merge(conn):
+    # KG-AC-78's own "never last-write-wins" promise must hold across batches too, not just
+    # within one -- a later document disagreeing with an earlier one is a finding, not overwritten.
+    f1, f2 = f"canon-{uuid.uuid4()}", f"canon-{uuid.uuid4()}"
+    try:
+        with conn.cursor() as cur:
+            _seed(cur, f1, [("Acme Corp", "Organization", "docA",
+                            [{"property": "effectiveDate", "value": "15 March 2025",
+                              "normalized_value": "2025-03-15", "evidence": "e1",
+                              "source_doc_id": "docA", "page": 1}])])
+        conn.commit()
+        canonicalize_batch(_DbShim(conn), [f1], pack=FIBO)
+        conn.commit()
+
+        with conn.cursor() as cur:
+            _seed(cur, f2, [("Acme Corporation", "Organization", "docB",
+                            [{"property": "effectiveDate", "value": "20 March 2025",
+                              "normalized_value": "2025-03-20", "evidence": "e2",
+                              "source_doc_id": "docB", "page": 1}])])
+        conn.commit()
+        canonicalize_batch(_DbShim(conn), [f2], pack=FIBO)
+        conn.commit()
+
+        with conn.cursor() as cur:
+            attrs = _canonical_attributes(cur, "Organization|acme")
+        entries = attrs["effectiveDate"]
+        assert len(entries) == 2  # NEITHER document's value overwritten
+        assert all(e["conflicting"] is True for e in entries)
+        assert {e["normalized_value"] for e in entries} == {"2025-03-15", "2025-03-20"}
     finally:
         _cleanup(conn, [f1, f2], ["Organization|acme"])
 
