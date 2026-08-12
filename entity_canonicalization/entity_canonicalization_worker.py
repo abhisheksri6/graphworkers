@@ -44,6 +44,15 @@ class EntityCanonicalizationSettings(BaseSettings):
     blob_storage_uri: str = Field(default="", validation_alias=AliasChoices("BLOB_STORAGE_URI"))
     queues: str = Field(default="entity_canonicalization",
                         validation_alias=AliasChoices("ENTITY_CANONICALIZATION_QUEUES", "CELERY_QUEUE"))
+    # KG-AC-35 amended (2026-08-12, owner-directed): the canon node has no config UI surface today
+    # to set connection_id explicitly, so a new pipeline needs a working default rather than failing
+    # loud on its first ambiguous pair. Env-overridable (not a bare code constant) since a connection
+    # PROFILE NAME is deployment-specific data, not a universal default like a model id -- set to ""
+    # to restore the pre-2026-08-12 fail-loud-when-absent behavior explicitly.
+    default_llm_connection_id: str = Field(
+        default="AWS LLM Connection",
+        validation_alias=AliasChoices("ENTITY_CANONICALIZATION_DEFAULT_CONNECTION_ID"),
+    )
 
 
 settings = EntityCanonicalizationSettings()
@@ -64,6 +73,16 @@ def make_llm_adjudicator(client) -> Callable[[Mention, Mention], bool]:
         )
         return client.complete(prompt).strip().lower().startswith("y")
     return adjudicate
+
+
+def _resolve_connection_id(cfg: Dict[str, Any]) -> Optional[str]:
+    """KG-AC-35 (amended 2026-08-12): the profile's own `connection_id` always wins when present;
+    otherwise falls back to `settings.default_llm_connection_id` so a new pipeline (which has no
+    node-UI surface to set this today) still gets a working LLM connection for ambiguous-band
+    adjudication, rather than failing loud on its first ambiguous pair. An operator can restore the
+    old fail-loud-when-absent behavior by setting the env var to an empty string -- `or None` at the
+    end keeps that case (and a genuinely blank default) as "no connection", not the string ""."""
+    return cfg.get("connection_id") or settings.default_llm_connection_id or None
 
 
 def _no_connection_adjudicator(a: Mention, b: Mention) -> bool:
@@ -93,7 +112,10 @@ def process_batch(task_id, folder_ids: Sequence[str], entity_canonicalization_co
     try:
         fuzzy_floor = float(cfg.get("fuzzy_floor", 0.80))
         fuzzy_ceiling = float(cfg.get("fuzzy_ceiling", 0.95))
-        connection_id = cfg.get("connection_id")
+        connection_id = _resolve_connection_id(cfg)
+        if connection_id and connection_id != cfg.get("connection_id"):
+            logger.info("entity_canonicalization: no connection_id configured, defaulting to %r",
+                       connection_id)
         if adjudicate is None:
             if llm_client is None and connection_id:
                 llm_client = build_llm_client(connection_id)

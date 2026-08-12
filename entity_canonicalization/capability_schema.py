@@ -23,7 +23,7 @@ CAPABILITY_SCHEMA: Dict[str, Any] = {
         "entity_canonicalization_config.fuzzy_ceiling": {"type": "number", "required": "optional",
                                                          "description": "Above this = auto-accept; between floor and ceiling = LLM adjudication"},
         "entity_canonicalization_config.connection_id": {"type": "string", "required": "optional",
-                                                         "description": "LLM connection for ambiguous-band adjudication (required if adjudication reachable)"},
+                                                         "description": "LLM connection for ambiguous-band adjudication. Defaults to the worker's ENTITY_CANONICALIZATION_DEFAULT_CONNECTION_ID setting (\"AWS LLM Connection\" unless overridden) when absent — there is currently no node UI to set this explicitly, KG-AC-35 amended 2026-08-12"},
     },
     "output_fields": {
         "canonical_count": {"type": "integer", "always_present": True,
