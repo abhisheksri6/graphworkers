@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
@@ -28,7 +28,12 @@ AMBIGUOUS = "ambiguous"
 class Mention:
     """One staged entity mention being canonicalized. The provenance fields (KG-AC-76) are optional
     because clustering itself (block_key/match_band) never needs them — only choose_canonical_name
-    does; callers that don't compute a display name may omit them."""
+    does; callers that don't compute a display name may omit them.
+
+    ``identifiers`` (KG-AC-24 amended, P25) maps a pack-declared identifier property to its
+    normalized value (e.g. ``{"agreementId": "ima-gue-2026-101"}``) — populated by
+    ``identifier_values`` from the mention's own extracted facts. Empty for identifier-less
+    entities, which then cluster purely by the pre-P25 rules."""
     entity_uid: str
     entity_type: str
     surface_form: str
@@ -37,6 +42,7 @@ class Mention:
     source_chunk_id: Optional[str] = None
     span_start: Optional[int] = None
     is_abstract: bool = False
+    identifiers: Dict[str, str] = field(default_factory=dict)
 
 
 def normalize_surface(surface: str) -> str:
@@ -46,6 +52,58 @@ def normalize_surface(surface: str) -> str:
     s = re.sub(r"[^a-z0-9\s]", " ", s)
     tokens = [t for t in s.split() if t and t not in _LEGAL_SUFFIXES]
     return " ".join(tokens)
+
+
+def normalize_identifier(value: str) -> str:
+    """Casefold + collapse whitespace, and NOTHING else (KG-AC-24 amended, P25).
+
+    Deliberately NOT ``normalize_surface``: an identifier is an **opaque token**, not a name. Its
+    punctuation is significant, and its tokens are not company-name parts — running it through the
+    legal-suffix stripper mangles real identifiers (``LP-2026-001`` → ``2026 001``, because ``lp``
+    is in ``_LEGAL_SUFFIXES``). Applying name-normalization to an identifier is the same category
+    error as treating a declared alias as coreference."""
+    return " ".join((value or "").split()).casefold()
+
+
+def identifier_values(attributes: Sequence[Dict[str, Any]], entity_type: str, pack) -> Dict[str, str]:
+    """The pack-declared IDENTIFIER facts carried by one mention (KG-AC-24 amended, P25):
+    ``{property: normalized_value}`` for every fact whose property the pack declares with
+    ``range="identifier"`` AND ``domain=entity_type``.
+
+    Domain-scoping is load-bearing, not decoration: it stops an ``Agreement`` and a
+    ``Subscription`` that happen to carry the same raw string from being treated as one identity.
+    No pack, no attributes, or a pack declaring no ``datatype_properties`` (``generic``,
+    ``fibo_core``, ``fibo_custom``) all yield ``{}`` — never an error, so identifier-less packs
+    keep exactly their pre-P25 behaviour."""
+    if pack is None or not attributes:
+        return {}
+    declared = getattr(pack, "datatype_properties", None) or {}
+    out: Dict[str, str] = {}
+    for fact in attributes:
+        prop = (fact or {}).get("property")
+        dp = declared.get(prop)
+        if dp is None or dp.range != "identifier" or dp.domain != entity_type:
+            continue
+        raw = fact.get("normalized_value") or fact.get("value")
+        norm = normalize_identifier(raw)
+        if norm:
+            out[prop] = norm
+    return out
+
+
+def cluster_identifier(cluster: Sequence[Mention]) -> Optional[str]:
+    """The identity basis for a cluster that carries a pack-declared identifier (KG-AC-79 amended,
+    P25) — used by store.py as the ``normalized_form``/``canonical_key`` basis so cross-run reuse
+    keys on the IDENTIFIER, not on whichever surface happened to sort first.
+
+    Without this, Tier-1 merging would fix within-batch fragmentation but BREAK cross-run identity
+    (KG-AC-38): two runs whose clusters contain different surface subsets would pick different
+    ``cluster[0].normalized_form`` values and therefore mint different canonical_keys for the same
+    real entity. Deterministic under input reordering (``min`` over all values, not positional) —
+    a well-formed cluster carries exactly one value; ``min`` only matters defensively, if the fuzzy
+    or LLM tier merged two identifier-bearing mentions."""
+    values = sorted({v for m in cluster for v in (m.identifiers or {}).values() if v})
+    return values[0] if values else None
 
 
 def slugify(s: str) -> str:
@@ -86,8 +144,21 @@ def fuzzy_score(a: str, b: str) -> float:
 
 def match_band(a: Mention, b: Mention, *, fuzzy_floor: float, fuzzy_ceiling: float) -> str:
     """Three-band match (KG-AC-24, *amended v11 — the LEI-equal short-circuit is removed with the
-    gazetteer/external-id plane*): exact normalized ⇒ accept; fuzzy ≥ ceiling ⇒ accept; < floor ⇒
-    reject; between ⇒ ambiguous (→ LLM)."""
+    gazetteer/external-id plane*; ***re-introduced on a pack-declared basis at P25***): a shared
+    identifier property decides the match OUTRIGHT, in both directions, before any surface
+    comparison — equal values ⇒ accept, DIFFERENT values ⇒ reject.
+
+    The reject direction is the load-bearing half and is not symmetric decoration: a mismatched
+    strong identifier is decisive NEGATIVE evidence. Without it, fifty distinct agreements all
+    titled "Investment Management Agreement" — routine in this domain — would collapse into ONE
+    canonical entity on exact surface equality, each one's identifier silently overruled by its
+    generic title. Found by this rule's own test at implementation (P25).
+
+    Then the surface bands, unchanged: exact normalized ⇒ accept; fuzzy ≥ ceiling ⇒ accept;
+    < floor ⇒ reject; between ⇒ ambiguous (→ LLM)."""
+    shared = set(a.identifiers or {}) & set(b.identifiers or {})
+    if shared:
+        return ACCEPT if all(a.identifiers[p] == b.identifiers[p] for p in shared) else REJECT
     if a.normalized_form and a.normalized_form == b.normalized_form:
         return ACCEPT
     score = fuzzy_score(a.normalized_form, b.normalized_form)
@@ -126,11 +197,35 @@ def cluster_mentions(
     mentions: List[Mention], *, fuzzy_floor: float, fuzzy_ceiling: float,
     adjudicate: Optional[Callable[[Mention, Mention], bool]] = None,
 ) -> List[List[Mention]]:
-    """Cluster mentions to one identity per real-world entity (KG-AC-22). Blocks by block_key, then
+    """Cluster mentions to one identity per real-world entity (KG-AC-22), in two tiers:
+
+    **Tier 1 — identifier equality (KG-AC-24 amended, P25).** Mentions of the SAME entity_type
+    sharing a pack-declared identifier value are unioned unconditionally, **bypassing blocking,
+    the fuzzy bands and the LLM entirely**. Deterministic and free (the identifiers were already
+    extracted as facts). This tier exists because the other one structurally cannot reach these
+    cases: the four surfaces of one real agreement (``"Agreement"`` / ``"This Agreement"`` /
+    ``"Investment Advisory and Fiduciary Management Agreement"`` / ``"… IMA-GUE-2026-101"``) land
+    in four different blocks, so they are never even COMPARED, and score 0.15–0.38 against a 0.80
+    floor, so they would be rejected if they were. Found live 2026-08-12: one agreement exported to
+    Neo4j as four nodes, with three of them already carrying the identical ``agreementId``.
+
+    **Tier 2 — blocking + the three-band surface match (unchanged).** Blocks by block_key, then
     within each block unions any pair that matches (ACCEPT, or AMBIGUOUS resolved true by
-    ``adjudicate`` — the LLM; None ⇒ ambiguous pairs are NOT merged). Deterministic for a fixed
-    adjudicate. Returns clusters in first-appearance order."""
+    ``adjudicate`` — the LLM; None ⇒ ambiguous pairs are NOT merged).
+
+    Deterministic for a fixed adjudicate. Returns clusters in first-appearance order."""
     uf = _UnionFind([m.entity_uid for m in mentions])
+
+    # Tier 1 — keyed by (entity_type, property, value): a shared value across DIFFERENT types is
+    # not an identity claim (an Agreement and a Subscription may legitimately collide on a string).
+    by_identifier: Dict[Tuple[str, str, str], List[str]] = {}
+    for m in mentions:
+        for prop, value in (m.identifiers or {}).items():
+            by_identifier.setdefault((m.entity_type, prop, value), []).append(m.entity_uid)
+    for uids in by_identifier.values():
+        for other in uids[1:]:
+            uf.union(uids[0], other)
+
     by_block: Dict[str, List[Mention]] = {}
     for m in mentions:
         by_block.setdefault(block_key(m), []).append(m)

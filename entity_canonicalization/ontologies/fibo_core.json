@@ -1,7 +1,7 @@
 {
   "name": "fibo_core",
-  "version": "1.0",
-  "description": "Finance SAMPLE pack (ADR-0008), FIBO-derived: 24 entity types with a parent subtype hierarchy + 10 relations, curated from a real filing in the increment-0 spike. FIBO is ONE example — the design is ontology-agnostic. The `iri` refs are illustrative and UNVERIFIED against a live FIBO release (spike F-IRI-1); they are inert traceability metadata, NOT a freeze gate.",
+  "version": "1.1",
+  "description": "Finance SAMPLE pack (ADR-0008), FIBO-derived: 24 entity types with a parent subtype hierarchy + 10 relations, curated from a real filing in the increment-0 spike. FIBO is ONE example — the design is ontology-agnostic. The `iri` refs are illustrative and UNVERIFIED against a live FIBO release (spike F-IRI-1); they are inert traceability metadata, NOT a freeze gate. v1.1 (2026-08-07): dep_patterns expanded from 1 to 7 relations (item #2, deterministic relation floor) — employs/issues/advises/manages/regulates (SVO), subsidiaryOf (copula), locatedIn (passive+prep); hasExecutive/hasRating/denominatedIn left LLM-only (no clean single dependency phrasing). All shapes verified via a spaCy DependencyMatcher spike before authoring.",
   "entity_types": [
     {"type": "Organization", "parent": null, "spacy_labels": ["ORG"], "guidance": "Any legal entity, company, institution, or agency.", "iri": "https://spec.edmcouncil.org/fibo/ontology/FND/Organizations/FormalOrganizations/FormalOrganization"},
     {"type": "Bank", "parent": "Organization", "spacy_labels": [], "guidance": "A depository/commercial/investment bank.", "iri": "https://spec.edmcouncil.org/fibo/ontology/FBC/FunctionalEntities/FinancialServicesEntities/Bank"},
@@ -39,5 +39,52 @@
     {"type": "locatedIn", "domain": ["Organization"], "range": ["Location"], "guidance": "An organization is located in a place."},
     {"type": "hasRating", "domain": ["FinancialInstrument"], "range": ["CreditRating"], "guidance": "An instrument carries a credit rating."},
     {"type": "denominatedIn", "domain": ["FinancialInstrument"], "range": ["Currency"], "guidance": "An instrument is denominated in a currency."}
+  ],
+  "dep_patterns": [
+    {"relation_type": "employs", "src_node": "subject", "dst_node": "object", "_comment": "SVO: '<Organization> employs/hires <Person>'.",
+     "pattern": [
+       {"RIGHT_ID": "verb", "RIGHT_ATTRS": {"LEMMA": {"IN": ["employ", "hire"]}}},
+       {"LEFT_ID": "verb", "REL_OP": ">", "RIGHT_ID": "subject", "RIGHT_ATTRS": {"DEP": "nsubj"}},
+       {"LEFT_ID": "verb", "REL_OP": ">", "RIGHT_ID": "object", "RIGHT_ATTRS": {"DEP": {"IN": ["dobj", "obj"]}}}
+     ]},
+    {"relation_type": "issues", "src_node": "subject", "dst_node": "object", "_comment": "SVO: '<Organization> issues <FinancialInstrument>'.",
+     "pattern": [
+       {"RIGHT_ID": "verb", "RIGHT_ATTRS": {"LEMMA": "issue"}},
+       {"LEFT_ID": "verb", "REL_OP": ">", "RIGHT_ID": "subject", "RIGHT_ATTRS": {"DEP": "nsubj"}},
+       {"LEFT_ID": "verb", "REL_OP": ">", "RIGHT_ID": "object", "RIGHT_ATTRS": {"DEP": {"IN": ["dobj", "obj"]}}}
+     ]},
+    {"relation_type": "advises", "src_node": "subject", "dst_node": "object", "_comment": "SVO: '<InvestmentAdviser> advises <InvestmentFund>'.",
+     "pattern": [
+       {"RIGHT_ID": "verb", "RIGHT_ATTRS": {"LEMMA": "advise"}},
+       {"LEFT_ID": "verb", "REL_OP": ">", "RIGHT_ID": "subject", "RIGHT_ATTRS": {"DEP": "nsubj"}},
+       {"LEFT_ID": "verb", "REL_OP": ">", "RIGHT_ID": "object", "RIGHT_ATTRS": {"DEP": {"IN": ["dobj", "obj"]}}}
+     ]},
+    {"relation_type": "manages", "src_node": "subject", "dst_node": "object", "_comment": "SVO: '<Organization> manages <InvestmentFund>'.",
+     "pattern": [
+       {"RIGHT_ID": "verb", "RIGHT_ATTRS": {"LEMMA": "manage"}},
+       {"LEFT_ID": "verb", "REL_OP": ">", "RIGHT_ID": "subject", "RIGHT_ATTRS": {"DEP": "nsubj"}},
+       {"LEFT_ID": "verb", "REL_OP": ">", "RIGHT_ID": "object", "RIGHT_ATTRS": {"DEP": {"IN": ["dobj", "obj"]}}}
+     ]},
+    {"relation_type": "regulates", "src_node": "subject", "dst_node": "object", "_comment": "SVO: '<RegulatoryAgency> regulates <Organization>'.",
+     "pattern": [
+       {"RIGHT_ID": "verb", "RIGHT_ATTRS": {"LEMMA": "regulate"}},
+       {"LEFT_ID": "verb", "REL_OP": ">", "RIGHT_ID": "subject", "RIGHT_ATTRS": {"DEP": "nsubj"}},
+       {"LEFT_ID": "verb", "REL_OP": ">", "RIGHT_ID": "object", "RIGHT_ATTRS": {"DEP": {"IN": ["dobj", "obj"]}}}
+     ]},
+    {"relation_type": "subsidiaryOf", "src_node": "subject", "dst_node": "object", "_comment": "Copula: '<Organization> is a subsidiary of <Organization>' (attr noun 'subsidiary' <- copula -> nsubj; 'of'-prep -> pobj). Verified via spike 2026-08-07.",
+     "pattern": [
+       {"RIGHT_ID": "noun", "RIGHT_ATTRS": {"LEMMA": "subsidiary"}},
+       {"LEFT_ID": "noun", "REL_OP": "<", "RIGHT_ID": "cop", "RIGHT_ATTRS": {}},
+       {"LEFT_ID": "cop", "REL_OP": ">", "RIGHT_ID": "subject", "RIGHT_ATTRS": {"DEP": "nsubj"}},
+       {"LEFT_ID": "noun", "REL_OP": ">", "RIGHT_ID": "prep", "RIGHT_ATTRS": {"DEP": "prep", "LEMMA": "of"}},
+       {"LEFT_ID": "prep", "REL_OP": ">", "RIGHT_ID": "object", "RIGHT_ATTRS": {"DEP": "pobj"}}
+     ]},
+    {"relation_type": "locatedIn", "src_node": "subject", "dst_node": "object", "_comment": "Passive+prep: '<Organization> is located/based/headquartered in/at <Location>'. Verified via spike 2026-08-07.",
+     "pattern": [
+       {"RIGHT_ID": "verb", "RIGHT_ATTRS": {"LEMMA": {"IN": ["locate", "base", "headquarter"]}}},
+       {"LEFT_ID": "verb", "REL_OP": ">", "RIGHT_ID": "subject", "RIGHT_ATTRS": {"DEP": {"IN": ["nsubj", "nsubjpass"]}}},
+       {"LEFT_ID": "verb", "REL_OP": ">", "RIGHT_ID": "prep", "RIGHT_ATTRS": {"DEP": "prep", "LEMMA": {"IN": ["in", "at"]}}},
+       {"LEFT_ID": "prep", "REL_OP": ">", "RIGHT_ID": "object", "RIGHT_ATTRS": {"DEP": "pobj"}}
+     ]}
   ]
 }

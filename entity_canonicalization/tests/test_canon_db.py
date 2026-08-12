@@ -341,3 +341,98 @@ def test_mid_batch_failure_rolls_back_all_staged(conn):
         assert all(r[3] == "staged" and r[2] is None for r in rows)
     finally:
         _cleanup(conn, [f])
+
+
+# ---- P25 (KG-AC-24/79 amended): identifier-bearing identity, end-to-end -------------------------
+INVEST = load_pack("investment_fibo")
+
+
+def _agreement_id_fact(value):
+    return [{"property": "agreementId", "value": value, "normalized_value": value,
+             "evidence": f"reference number {value}", "source_doc_id": "d1", "page": 1}]
+
+
+def test_one_agreement_four_surfaces_collapses_to_one_canonical_entity(conn):
+    """THE production regression (job manual__2026-08-12T17:27:55, folder 36e398eb): ONE agreement
+    reached Neo4j as FOUR nodes because canonicalization clustered on surface only, while three of
+    the four mentions already carried the identical `agreementId` in their own extracted facts.
+    Pre-P25 this produced 4 canonical entities; it must now produce exactly 1."""
+    f1 = f"canon-{uuid.uuid4()}"
+    aid = _agreement_id_fact("IMA-GUE-2026-101")
+    try:
+        with conn.cursor() as cur:
+            _seed(cur, f1, [
+                ("Investment Advisory and Fiduciary Management Agreement", "Agreement", "d1", aid),
+                ("Agreement", "Agreement", "d1", aid),
+                ("This Agreement", "Agreement", "d1", aid),
+                ("Investment Advisory and Fiduciary Management Agreement IMA-GUE-2026-101",
+                 "Agreement", "d1", aid),
+            ])
+        conn.commit()
+        summary = canonicalize_batch(_DbShim(conn), [f1], pack=INVEST)
+        conn.commit()
+
+        assert summary["canonical_count"] == 1, summary
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT COUNT(DISTINCT canonical_id) FROM public.kg_entities WHERE folder_id=%s", (f1,))
+            assert cur.fetchone()[0] == 1
+            # keyed on the IDENTIFIER, not on whichever surface sorted first (KG-AC-79 amended)
+            name, aliases = _canonical_row(cur, "agreement:ima-gue-2026-101")
+            assert name == "Investment Advisory and Fiduciary Management Agreement IMA-GUE-2026-101"
+            assert sorted(aliases) == sorted([
+                "Agreement", "This Agreement",
+                "Investment Advisory and Fiduciary Management Agreement",
+            ])
+    finally:
+        _cleanup(conn, [f1], ["agreement:ima-gue-2026-101"])
+
+
+def test_identifier_keyed_entity_reuses_its_canonical_id_across_runs(conn):
+    """KG-AC-38 must keep holding once the key basis is the identifier: a LATER batch seeing a
+    DIFFERENT surface subset of the same agreement must resolve to the SAME canonical_id -- the
+    exact failure mode that would have appeared had the key stayed surface-derived."""
+    f1, f2 = f"canon-{uuid.uuid4()}", f"canon-{uuid.uuid4()}"
+    aid = _agreement_id_fact("IMA-GUE-2026-101")
+    try:
+        with conn.cursor() as cur:
+            _seed(cur, f1, [("This Agreement", "Agreement", "d1", aid)])
+        conn.commit()
+        canonicalize_batch(_DbShim(conn), [f1], pack=INVEST)
+        conn.commit()
+        with conn.cursor() as cur:
+            cur.execute("SELECT DISTINCT canonical_id FROM public.kg_entities WHERE folder_id=%s", (f1,))
+            first_id = cur.fetchone()[0]
+
+        # a later run, entirely different surface, same agreementId
+        with conn.cursor() as cur:
+            _seed(cur, f2, [("Investment Advisory and Fiduciary Management Agreement",
+                             "Agreement", "d2", aid)])
+        conn.commit()
+        summary = canonicalize_batch(_DbShim(conn), [f2], pack=INVEST)
+        conn.commit()
+
+        assert summary["minted_count"] == 0 and summary["merged_count"] == 1, summary
+        with conn.cursor() as cur:
+            cur.execute("SELECT DISTINCT canonical_id FROM public.kg_entities WHERE folder_id=%s", (f2,))
+            assert cur.fetchone()[0] == first_id
+    finally:
+        _cleanup(conn, [f1, f2], ["agreement:ima-gue-2026-101"])
+
+
+def test_distinct_agreements_sharing_a_generic_title_stay_separate(conn):
+    """The identifier-CONFLICT half, end-to-end: identical surfaces + different agreementIds are
+    two entities, never one -- exact surface equality must not overrule an identifier mismatch."""
+    f1 = f"canon-{uuid.uuid4()}"
+    try:
+        with conn.cursor() as cur:
+            _seed(cur, f1, [
+                ("Investment Management Agreement", "Agreement", "d1", _agreement_id_fact("IMA-2026-001")),
+                ("Investment Management Agreement", "Agreement", "d2", _agreement_id_fact("IMA-2026-002")),
+            ])
+        conn.commit()
+        summary = canonicalize_batch(_DbShim(conn), [f1], pack=INVEST)
+        conn.commit()
+        assert summary["canonical_count"] == 2, summary
+    finally:
+        _cleanup(conn, [f1], ["agreement:ima-2026-001", "agreement:ima-2026-002"])

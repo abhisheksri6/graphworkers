@@ -15,8 +15,8 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 from psycopg2.extras import Json
 
 from core import (
-    Mention, aggregate_edge_group, canonical_key, choose_canonical_name, cluster_mentions,
-    merge_attributes, normalize_surface, reconcile_type,
+    Mention, aggregate_edge_group, canonical_key, choose_canonical_name, cluster_identifier,
+    cluster_mentions, identifier_values, merge_attributes, normalize_surface, reconcile_type,
 )
 
 _DEFAULT_FLOOR = 0.80
@@ -36,18 +36,22 @@ def batch_pack_name(cur, folder_ids: Sequence[str]) -> Optional[str]:
     return row[0] if row else None
 
 
-def read_staged_mentions(cur, folder_ids: Sequence[str]) -> List[Mention]:
+def read_staged_mentions(cur, folder_ids: Sequence[str], pack=None) -> List[Mention]:
+    """``pack`` (KG-AC-24 amended, P25) resolves each mention's pack-declared IDENTIFIER facts from
+    its own ``attributes`` — the identity evidence Tier-1 clustering runs on. Omitted/None keeps
+    exactly the pre-P25 behaviour (no identifiers, surface-only clustering)."""
     cur.execute(
-        """SELECT entity_uid, entity_type, surface_form
+        """SELECT entity_uid, entity_type, surface_form, attributes
              FROM public.kg_entities
             WHERE folder_id = ANY(%s) AND stage = 'staged'
             ORDER BY id""",
         (list(folder_ids),),
     )
     out: List[Mention] = []
-    for uid, etype, surface in cur.fetchall():
+    for uid, etype, surface, attributes in cur.fetchall():
         m = Mention(entity_uid=uid, entity_type=etype, surface_form=surface)
         m.normalized_form = normalize_surface(surface)
+        m.identifiers = identifier_values(attributes or [], etype, pack)
         out.append(m)
     return out
 
@@ -227,7 +231,7 @@ def canonicalize_batch(db, folder_ids: Sequence[str], *, fuzzy_floor: float = _D
     merged = 0
     canonical_ids: set = set()
     with conn.cursor() as cur:
-        mentions = read_staged_mentions(cur, folder_ids)
+        mentions = read_staged_mentions(cur, folder_ids, pack)
         if not mentions:
             return {"canonical_count": 0, "merged_count": 0, "minted_count": 0}
 
@@ -235,7 +239,13 @@ def canonicalize_batch(db, folder_ids: Sequence[str], *, fuzzy_floor: float = _D
                                     adjudicate=adjudicate)
         for cluster in clusters:
             rtype = reconcile_type([m.entity_type for m in cluster], pack) if pack else cluster[0].entity_type
-            norm = cluster[0].normalized_form
+            # KG-AC-79 amended (P25): an identifier-bearing cluster keys on its IDENTIFIER, not on
+            # whichever surface sorted first — otherwise Tier-1 merging would fix within-batch
+            # fragmentation while BREAKING cross-run reuse (KG-AC-38), since two runs seeing
+            # different surface subsets of the same entity would mint different canonical_keys.
+            # `normalized_form` is the match key by definition, so it carries the identity basis;
+            # the human-readable surfaces live in canonical_name/aliases (KG-AC-76/77).
+            norm = cluster_identifier(cluster) or cluster[0].normalized_form
             cid, was_minted = _resolve_or_mint(cur, rtype, norm)
             minted += 1 if was_minted else 0
             merged += 0 if was_minted else 1
