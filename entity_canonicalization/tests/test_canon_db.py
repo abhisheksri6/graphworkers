@@ -44,17 +44,28 @@ def conn():
 
 
 def _seed(cur, folder_id, mentions):
-    """mentions: list of (surface, entity_type)."""
-    for i, (surface, etype) in enumerate(mentions):
+    """mentions: list of (surface, entity_type) OR (surface, entity_type, source_doc_id)."""
+    for i, item in enumerate(mentions):
+        surface, etype = item[0], item[1]
+        doc_id = item[2] if len(item) > 2 else None
         uid = f"{folder_id}:{i}"
         cur.execute(
             """INSERT INTO public.kg_entities
-                   (folder_id, entity_uid, entity_type, surface_form,
+                   (folder_id, entity_uid, entity_type, surface_form, source_doc_id,
                     ontology_pack, ontology_version, stage)
-               VALUES (%s,%s,%s,%s,'fibo_core','1.0','staged')
+               VALUES (%s,%s,%s,%s,%s,'fibo_core','1.0','staged')
                ON CONFLICT (entity_uid) DO NOTHING""",
-            (folder_id, uid, etype, surface),
+            (folder_id, uid, etype, surface, doc_id),
         )
+
+
+def _canonical_row(cur, canonical_key):
+    cur.execute(
+        "SELECT canonical_name, aliases FROM public.kg_canonical_entities WHERE canonical_key = %s",
+        (canonical_key,),
+    )
+    row = cur.fetchone()
+    return (row[0], row[1]) if row else (None, None)
 
 
 def _rows(cur, folder_id):
@@ -129,6 +140,59 @@ def test_cross_run_reuses_existing_canonical(conn):
         with conn.cursor() as cur:
             cid2 = _rows(cur, f2)[0][2]
         assert cid2 == cid1  # the two become one graph node across runs
+    finally:
+        _cleanup(conn, [f1, f2], ["Organization|acme"])
+
+
+@pytest.mark.ac("KG-AC-76")
+@pytest.mark.ac("KG-AC-77")
+def test_canonical_name_and_aliases_written_on_mint(conn):
+    fa = f"canon-{uuid.uuid4()}"
+    try:
+        with conn.cursor() as cur:
+            _seed(cur, fa, [("Acme", "Organization"), ("Acme Corporation", "Organization"),
+                            ("Acme Corp", "Organization")])
+        conn.commit()
+        canonicalize_batch(_DbShim(conn), [fa], pack=FIBO)
+        conn.commit()
+
+        with conn.cursor() as cur:
+            name, aliases = _canonical_row(cur, "Organization|acme")
+        assert name == "Acme Corporation"  # longest complete surface
+        assert set(aliases) == {"Acme", "Acme Corp"}
+        assert "Acme Corporation" not in aliases
+    finally:
+        _cleanup(conn, [fa], ["Organization|acme"])
+
+
+@pytest.mark.ac("KG-AC-77")
+def test_aliases_grow_across_a_cross_run_merge(conn):
+    # KG-AC-77's stated purpose is "every string that resolved to this instance" -- a LATER batch
+    # (KG-AC-38 cross-run reuse) introducing a new surface variant must be reflected in aliases,
+    # not just the founding batch's cluster.
+    f1, f2 = f"canon-{uuid.uuid4()}", f"canon-{uuid.uuid4()}"
+    try:
+        with conn.cursor() as cur:
+            _seed(cur, f1, [("Acme Corp", "Organization")])
+        conn.commit()
+        canonicalize_batch(_DbShim(conn), [f1], pack=FIBO)
+        conn.commit()
+        with conn.cursor() as cur:
+            name1, aliases1 = _canonical_row(cur, "Organization|acme")
+        assert name1 == "Acme Corp" and aliases1 == []
+
+        with conn.cursor() as cur:
+            _seed(cur, f2, [("Acme Corporation", "Organization")])  # longer -> new surface, later batch
+        conn.commit()
+        canonicalize_batch(_DbShim(conn), [f2], pack=FIBO)
+        conn.commit()
+
+        with conn.cursor() as cur:
+            name2, aliases2 = _canonical_row(cur, "Organization|acme")
+        # the longer surface from the LATER batch now wins the display name...
+        assert name2 == "Acme Corporation"
+        # ...and the founding batch's surface is preserved as an alias, not dropped.
+        assert aliases2 == ["Acme Corp"]
     finally:
         _cleanup(conn, [f1, f2], ["Organization|acme"])
 

@@ -12,8 +12,10 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
+from psycopg2.extras import Json
+
 from core import (
-    Mention, aggregate_edge_group, canonical_key, cluster_mentions,
+    Mention, aggregate_edge_group, canonical_key, choose_canonical_name, cluster_mentions,
     normalize_surface, reconcile_type,
 )
 
@@ -77,6 +79,36 @@ def _assign(cur, entity_uids: Sequence[str], canonical_id: str, normalized_form:
               SET canonical_id = %s, normalized_form = %s, stage = 'canonicalized'
             WHERE entity_uid = ANY(%s)""",
         (canonical_id, normalized_form, list(entity_uids)),
+    )
+
+
+def _mentions_for_canonical(cur, canonical_id: str) -> List[Mention]:
+    """KG-AC-76/77: EVERY kg_entities row currently sharing this canonical_id — not just this
+    batch's cluster — so the display name / alias set stays true to "every string that resolved to
+    this instance" across cross-run merges (KG-AC-38), not only the founding batch. Re-derived from
+    the durable kg_entities rows each time, rather than accumulated in application state, so it is
+    idempotent and correct after a re-run."""
+    cur.execute(
+        """SELECT entity_uid, entity_type, surface_form, source_doc_id, source_chunk_id,
+                  span_start, is_abstract
+             FROM public.kg_entities
+            WHERE canonical_id = %s
+            ORDER BY id""",
+        (canonical_id,),
+    )
+    return [
+        Mention(entity_uid=r[0], entity_type=r[1], surface_form=r[2],
+               source_doc_id=r[3], source_chunk_id=r[4], span_start=r[5], is_abstract=bool(r[6]))
+        for r in cur.fetchall()
+    ]
+
+
+def _update_display_name(cur, canonical_id: str, canonical_name: str, aliases: List[str]) -> None:
+    cur.execute(
+        """UPDATE public.kg_canonical_entities
+              SET canonical_name = %s, aliases = %s
+            WHERE canonical_id = %s""",
+        (canonical_name, Json(aliases), canonical_id),
     )
 
 
@@ -178,6 +210,13 @@ def canonicalize_batch(db, folder_ids: Sequence[str], *, fuzzy_floor: float = _D
             merged += 0 if was_minted else 1
             canonical_ids.add(cid)
             _assign(cur, [m.entity_uid for m in cluster], cid, norm)
+
+            # KG-AC-76/77: recompute the display name/alias set from the FULL set of entities now
+            # sharing this canonical_id (this batch's cluster + any prior batch's, via cross-run
+            # reuse) — not just this batch's cluster — so aliases stay true across merges.
+            full_set = _mentions_for_canonical(cur, cid)
+            canonical_name, aliases = choose_canonical_name(full_set)
+            _update_display_name(cur, cid, canonical_name, aliases)
 
         # KG-AC-47: aggregate duplicate canonical edges for every triple this batch touches, in the
         # SAME transaction (KG-AC-40 — a failure anywhere above rolls this back too).

@@ -26,11 +26,17 @@ AMBIGUOUS = "ambiguous"
 
 @dataclass
 class Mention:
-    """One staged entity mention being canonicalized."""
+    """One staged entity mention being canonicalized. The provenance fields (KG-AC-76) are optional
+    because clustering itself (block_key/match_band) never needs them — only choose_canonical_name
+    does; callers that don't compute a display name may omit them."""
     entity_uid: str
     entity_type: str
     surface_form: str
     normalized_form: str = ""
+    source_doc_id: Optional[str] = None
+    source_chunk_id: Optional[str] = None
+    span_start: Optional[int] = None
+    is_abstract: bool = False
 
 
 def normalize_surface(surface: str) -> str:
@@ -116,6 +122,45 @@ def cluster_mentions(
     for m in mentions:  # first-appearance order preserved
         clusters.setdefault(uf.find(m.entity_uid), []).append(m)
     return list(clusters.values())
+
+
+def choose_canonical_name(mentions: List[Mention]) -> Tuple[str, List[str]]:
+    """KG-AC-76/77: ``canonical_name`` = the cluster's longest complete surface form, tie-broken by
+    mention frequency (how many rows share that exact surface), then by earliest
+    ``(source_doc_id, source_chunk_id, span_start)``. ``aliases`` = every OTHER distinct surface,
+    ordered by descending frequency then alphabetically — together, ``{canonical_name} | aliases``
+    equals exactly the cluster's distinct surface set (KG-AC-77's auditability purpose: "a reader
+    can see every string that resolved to this instance").
+
+    Deterministic under any input ordering (aggregates by surface across the whole list, not
+    position-dependent). Abstract instances (KG-AC-90) need no special case: their ``surface_form``
+    is already the document-printed identity value, never a composed name, and an abstract
+    cluster's mentions share that identical surface by construction — the general algorithm
+    preserves it for free. ``normalized_form`` (canonical_key's match key) is never read here."""
+    if not mentions:
+        raise ValueError("choose_canonical_name requires at least one mention")
+
+    by_surface: Dict[str, List[Mention]] = {}
+    for m in mentions:
+        by_surface.setdefault(m.surface_form, []).append(m)
+
+    def earliest_key(ms: List[Mention]) -> Tuple:
+        # None sorts LAST within each component — a located mention beats an unlocated one.
+        return min(
+            ((m.source_doc_id is None, m.source_doc_id or ""),
+             (m.source_chunk_id is None, m.source_chunk_id or ""),
+             (m.span_start is None, m.span_start or 0))
+            for m in ms
+        )
+
+    def rank(surface: str) -> Tuple:
+        ms = by_surface[surface]
+        return (-len(surface), -len(ms), earliest_key(ms))
+
+    ordered = sorted(by_surface.keys(), key=rank)
+    canonical_name, remaining = ordered[0], ordered[1:]
+    aliases = sorted(remaining, key=lambda s: (-len(by_surface[s]), s))
+    return canonical_name, aliases
 
 
 def reconcile_type(types: Sequence[str], pack) -> Optional[str]:
