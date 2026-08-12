@@ -56,7 +56,7 @@ def partition_replace(db, folder_id: str, run_id: Any, dag_id: Any, source_task_
                     e.get("confidence", 1.0),
                     e.get("extractor"), e.get("ontology_pack"), e.get("ontology_version"),
                     e.get("model_id"), e.get("stage", "staged"), Json(e.get("attributes", [])),
-                    e.get("reference_only", False),
+                    e.get("reference_only", False), Json(e.get("declared_aliases", [])),
                 )
                 for e in entity_rows
             ]
@@ -65,7 +65,7 @@ def partition_replace(db, folder_id: str, run_id: Any, dag_id: Any, source_task_
                   (folder_id, run_id, dag_id, source_task_id, entity_uid, entity_type, surface_form,
                    source_chunk_id, source_doc_id, page, is_abstract, span_start, span_end, occurrence_idx, confidence,
                    extractor, ontology_pack, ontology_version, model_id, stage, attributes,
-                   reference_only)
+                   reference_only, declared_aliases)
                 VALUES %s
                 ON CONFLICT (entity_uid) DO UPDATE SET
                   entity_type=EXCLUDED.entity_type, surface_form=EXCLUDED.surface_form,
@@ -74,7 +74,8 @@ def partition_replace(db, folder_id: str, run_id: Any, dag_id: Any, source_task_
                   confidence=EXCLUDED.confidence, extractor=EXCLUDED.extractor,
                   ontology_pack=EXCLUDED.ontology_pack, ontology_version=EXCLUDED.ontology_version,
                   model_id=EXCLUDED.model_id, stage=EXCLUDED.stage, attributes=EXCLUDED.attributes,
-                  reference_only=EXCLUDED.reference_only
+                  reference_only=EXCLUDED.reference_only,
+                  declared_aliases=EXCLUDED.declared_aliases
                 RETURNING id, entity_uid
             """, ent_values, page_size=500, fetch=True)
             uid_to_id = {row[1]: row[0] for row in returned}

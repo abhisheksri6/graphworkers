@@ -42,6 +42,9 @@ class Candidate:
     occurrence_idx: int = 0
     is_abstract: bool = False  # KG-AC-72 (v13) — a pack-declared abstract type, never span-located;
     # surface_form holds the model's synthesised name. Only LlmGraphStrategy ever sets this True.
+    declared_aliases: List[str] = field(default_factory=list)  # KG-AC-96 (P26) — terms the DOCUMENT
+    # explicitly binds to this entity ("hereinafter the 'Investor'"), never inferred. Only
+    # LlmGraphStrategy populates it; every other layer leaves it empty.
 
 
 @dataclass
@@ -188,8 +191,17 @@ def merge_candidates(candidates: List[Candidate]) -> List[Candidate]:
         )
         chosen: List[Tuple[int, Candidate]] = []
         for idx, cand in order:
-            if any(spans_overlap(cand, kc) for _, kc in chosen):
-                continue  # a higher/equal-precedence candidate already occupies this span
+            occupied = next((kc for _, kc in chosen if spans_overlap(cand, kc)), None)
+            if occupied is not None:
+                # KG-AC-96 (P26): a higher-precedence candidate already occupies this span, so this
+                # one is dropped — but its DECLARED ALIASES are not a layer-precedence question.
+                # Both candidates describe the same span, hence the same entity, and only the LLM
+                # layer ever carries a binding; discarding it would silently lose the document's own
+                # definition whenever a rules layer outranks the LLM at the same span.
+                for alias in (cand.declared_aliases or []):
+                    if alias not in occupied.declared_aliases:
+                        occupied.declared_aliases.append(alias)
+                continue
             chosen.append((idx, cand))
         kept.extend(chosen)
 
@@ -286,6 +298,9 @@ def build_entity_records(
             "ontology_version": ontology_version,
             "model_id": model_id if c.layer == "llm" else None,
             "stage": "staged",
+            # KG-AC-96 (P26): the document's own declared bindings for this entity — canonicalization
+            # reads them as a deterministic, document-scoped identity bridge (Tier 2).
+            "declared_aliases": list(c.declared_aliases or []),
         })
     return rows
 

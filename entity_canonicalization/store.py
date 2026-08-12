@@ -41,17 +41,21 @@ def read_staged_mentions(cur, folder_ids: Sequence[str], pack=None) -> List[Ment
     its own ``attributes`` — the identity evidence Tier-1 clustering runs on. Omitted/None keeps
     exactly the pre-P25 behaviour (no identifiers, surface-only clustering)."""
     cur.execute(
-        """SELECT entity_uid, entity_type, surface_form, attributes
+        """SELECT entity_uid, entity_type, surface_form, attributes, folder_id, declared_aliases
              FROM public.kg_entities
             WHERE folder_id = ANY(%s) AND stage = 'staged'
             ORDER BY id""",
         (list(folder_ids),),
     )
     out: List[Mention] = []
-    for uid, etype, surface, attributes in cur.fetchall():
-        m = Mention(entity_uid=uid, entity_type=etype, surface_form=surface)
+    for uid, etype, surface, attributes, folder_id, declared_aliases in cur.fetchall():
+        m = Mention(entity_uid=uid, entity_type=etype, surface_form=surface, folder_id=folder_id)
         m.normalized_form = normalize_surface(surface)
         m.identifiers = identifier_values(attributes or [], etype, pack)
+        # KG-AC-96 (P26): the document's own declared bindings, scoped by folder_id (one folder ==
+        # one document). Pre-P26 rows default to '[]' from the migration, so the Tier-2 pass is a
+        # no-op over historical data rather than an error.
+        m.declared_aliases = [a for a in (declared_aliases or []) if isinstance(a, str) and a.strip()]
         out.append(m)
     return out
 

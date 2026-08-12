@@ -134,6 +134,16 @@ def build_graph_system_prompt(pack) -> str:
         "text, not just once per distinct name. If \"Acme Corp\" is mentioned three times, return "
         "three separate entity items for it, not one. Do not deduplicate repeated mentions into a "
         "single item.\n\n"
+        # KG-AC-96 (P26): defined terms are STATED data, not inference. The instruction is
+        # deliberately declared-only — inviting the model to guess a binding would re-create
+        # coreference's probabilistic failure mode, which is exactly what this replaces.
+        "Aliases: when the document EXPLICITLY declares another name for an entity — as in "
+        "\"ACME LTD (hereinafter referred to as the 'Investor')\", \"ACME LTD (the 'Investor')\", or "
+        "a definitions clause binding a term — list every such declared term in that entity's "
+        "\"aliases\". Record them on the entity item for the FULL name (the one being defined), not "
+        "on the short term. Include ONLY terms the document itself binds; never invent an alias, "
+        "never infer one from context, and never add a descriptive label of your own. Most entities "
+        "have none — leave \"aliases\" empty or omit it.\n\n"
         "Relations: reference entities by POSITION, not by repeating their text. Each entity in "
         "your response is identified by its 0-based position in the entities array (the first "
         "entity is position 0, the second is position 1, and so on). When recording a relation, "
@@ -176,6 +186,17 @@ def build_graph_tool_schema(pack) -> Dict[str, Any]:
             "type": {"type": "string", "enum": entity_types},
             "surface": {"type": "string"},
             "confidence": {"type": "number"},
+            # KG-AC-96 (P26): terms the DOCUMENT explicitly binds to this entity. Optional and
+            # additive — omitting it is schema-valid and reproduces pre-P26 behaviour exactly.
+            "aliases": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "Alternative names the document EXPLICITLY declares for this entity, e.g. the "
+                    "defined term in 'ACME LTD (hereinafter referred to as the \"Investor\")'. Only "
+                    "terms the document itself binds — never inferred, never invented. Usually empty."
+                ),
+            },
         },
         "required": ["type", "surface"],
     }
@@ -294,6 +315,17 @@ class LlmGraphStrategy(EntityStrategy):
                         span_start=span[0], span_end=span[1],
                         confidence=float(item.get("confidence", 0.7)),
                     )
+                # KG-AC-96 (P26): declared aliases, sanitised — a malformed/absent key degrades to
+                # empty rather than crashing (the same posture the relations/facts keys already
+                # take), and blanks/non-strings/duplicates are dropped while order is preserved.
+                raw_aliases = item.get("aliases")
+                if isinstance(raw_aliases, list):
+                    for alias in raw_aliases:
+                        if not isinstance(alias, str) or not alias.strip():
+                            continue
+                        clean = alias.strip()
+                        if clean not in cand.declared_aliases:
+                            cand.declared_aliases.append(clean)
                 entities.append(cand)
                 by_raw_index[raw_idx] = cand
             relations_raw = data.get("relations")

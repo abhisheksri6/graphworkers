@@ -43,6 +43,12 @@ class Mention:
     span_start: Optional[int] = None
     is_abstract: bool = False
     identifiers: Dict[str, str] = field(default_factory=dict)
+    folder_id: Optional[str] = None  # KG-AC-96 (P26) — the document scope a declared alias binds
+    # within. Always present in practice (it is the batch query's own filter); one folder == one
+    # document in this pipeline, which makes it a stricter scope than source_doc_id (nullable when
+    # chunk_metadata is incomplete, KG-AC-73).
+    declared_aliases: List[str] = field(default_factory=list)  # KG-AC-96 (P26) — terms the DOCUMENT
+    # explicitly binds to this entity, carried through from extraction. Never inferred.
 
 
 def normalize_surface(surface: str) -> str:
@@ -52,6 +58,41 @@ def normalize_surface(surface: str) -> str:
     s = re.sub(r"[^a-z0-9\s]", " ", s)
     tokens = [t for t in s.split() if t and t not in _LEGAL_SUFFIXES]
     return " ".join(tokens)
+
+
+# Leading DETERMINERS, not just articles: contractual English cites a defined term as "the
+# Investor", "this Agreement", "such Party" interchangeably with the bare term. Stripping only
+# articles leaves "this agreement" unmatched against the declared term "Agreement" — found on the
+# real document during P26's own end-to-end replay, after the article-only version had already
+# fixed the party case.
+_LEADING_DETERMINERS = {"the", "a", "an", "this", "that", "these", "those", "such", "said"}
+
+
+def normalize_alias(value: str) -> str:
+    """``normalize_surface`` plus leading-determiner removal (KG-AC-96, P26).
+
+    A defined term is cited with and without its determiner interchangeably — the document writes
+    *(the "Investor")* and then refers to *"Investor"*, or defines *"Agreement"* and then writes
+    *"this Agreement"* — but ``normalize_surface`` keeps determiners (``the`` is not a legal
+    suffix), so ``"the investor"`` and ``"investor"`` would not match. Found twice by this rule's
+    own tests and the end-to-end replay: the bridge silently failed on the exact production cases
+    it was written for. Applied to BOTH sides of the lookup so the comparison is symmetric.
+
+    Scope keeps this safe: the bridge only fires for mentions of the SAME entity_type in the SAME
+    document where one side explicitly DECLARED the term — a determiner-stripped collision cannot
+    merge anything the document did not itself bind."""
+    tokens = normalize_surface(value).split()
+    while tokens and tokens[0] in _LEADING_DETERMINERS:
+        tokens.pop(0)
+    return " ".join(tokens)
+
+
+def _identifiers_conflict(a: Mention, b: Mention) -> bool:
+    """True iff both mentions declare the SAME identifier property with DIFFERENT values — the
+    decisive negative-evidence rule (KG-AC-24 amended). Shared by ``match_band`` and the Tier-2
+    alias bridge so a declared alias can never override a hard identifier mismatch."""
+    shared = set(a.identifiers or {}) & set(b.identifiers or {})
+    return any(a.identifiers[p] != b.identifiers[p] for p in shared)
 
 
 def normalize_identifier(value: str) -> str:
@@ -156,9 +197,8 @@ def match_band(a: Mention, b: Mention, *, fuzzy_floor: float, fuzzy_ceiling: flo
 
     Then the surface bands, unchanged: exact normalized ⇒ accept; fuzzy ≥ ceiling ⇒ accept;
     < floor ⇒ reject; between ⇒ ambiguous (→ LLM)."""
-    shared = set(a.identifiers or {}) & set(b.identifiers or {})
-    if shared:
-        return ACCEPT if all(a.identifiers[p] == b.identifiers[p] for p in shared) else REJECT
+    if set(a.identifiers or {}) & set(b.identifiers or {}):
+        return REJECT if _identifiers_conflict(a, b) else ACCEPT
     if a.normalized_form and a.normalized_form == b.normalized_form:
         return ACCEPT
     score = fuzzy_score(a.normalized_form, b.normalized_form)
@@ -225,6 +265,30 @@ def cluster_mentions(
     for uids in by_identifier.values():
         for other in uids[1:]:
             uf.union(uids[0], other)
+
+    # Tier 2 — document-declared aliases (KG-AC-96). A mention whose normalized surface matches a
+    # term another mention's document explicitly BOUND to itself is that entity, deterministically.
+    # Keyed by (folder_id, entity_type, normalized alias): the folder scope is semantic, not
+    # defensive — a defined term binds only inside its own document, and two documents may each
+    # define "the Investor" as a different party. Cross-document identity is Tier 1/3's job and
+    # composes with this transitively through the shared union-find.
+    by_declared_alias: Dict[Tuple[Optional[str], str, str], List[Mention]] = {}
+    for m in mentions:
+        for alias in (m.declared_aliases or []):
+            norm = normalize_alias(alias)
+            if norm:
+                by_declared_alias.setdefault((m.folder_id, m.entity_type, norm), []).append(m)
+    if by_declared_alias:
+        for m in mentions:
+            key = (m.folder_id, m.entity_type, normalize_alias(m.surface_form))
+            if not key[2]:
+                continue
+            for owner in by_declared_alias.get(key, ()):
+                # A declared alias is strong evidence, but NOT stronger than a hard identifier
+                # mismatch: Tier 1's conflict rule outranks it (two agreements with different ids
+                # stay apart even if one's declared term matches the other's surface).
+                if owner.entity_uid != m.entity_uid and not _identifiers_conflict(owner, m):
+                    uf.union(owner.entity_uid, m.entity_uid)
 
     by_block: Dict[str, List[Mention]] = {}
     for m in mentions:
