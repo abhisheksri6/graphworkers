@@ -81,6 +81,12 @@ CAPABILITY_SCHEMA: Dict[str, Any] = {
                                   "description": "Facts dropped because their evidence was not found verbatim in the source chunk (KG-AC-70)"},
         "guardrails_blocked_facts": {"type": "integer", "always_present": True,
                                     "description": "Facts dropped by the same once-per-batch guardrails screen entity candidates already pass through (KG-AC-84)"},
+        "underivable_entity_count": {"type": "integer", "always_present": True,
+                                     "description": "Abstract types with content but no resolvable identity value — skipped rather than minted under a fabricated key (KG-AC-92)"},
+        "ambiguous_attachment_count": {"type": "integer", "always_present": True,
+                                       "description": "Auto-relation attachments withheld because more than one hub of that type exists, so the pairing would have to be invented (KG-AC-91)"},
+        "unanchored_fact_count": {"type": "integer", "always_present": True,
+                                  "description": "Anchored facts dropped because their hub pairing is undeterminable — never left on an anchor that does not declare the property (KG-AC-93)"},
     },
     "artifact_inputs": {
         "chunks": {"required": "always",

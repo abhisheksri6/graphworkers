@@ -8,7 +8,11 @@
   "edge_count": 1,
   "distinct_types": 2,
   "top_entities": [
-    {"entity_type": "Organization", "surface_form": "Acme Corp", "mention_count": 2}
+    {
+      "entity_type": "Organization",
+      "surface_form": "Acme Corp",
+      "mention_count": 2
+    }
   ],
   "ontology_pack": "fibo_core",
   "ontology_version": "1.0",
@@ -21,8 +25,17 @@
   "unmapped_property_count": 0,
   "ungrounded_fact_count": 0,
   "guardrails_blocked_facts": 0,
+  "underivable_entity_count": 0,
+  "ambiguous_attachment_count": 0,
+  "unanchored_fact_count": 0,
   "usage": [
-    {"charge_category": "llm", "model": "amazon.nova-pro-v1:0", "input_tokens": 100, "output_tokens": 50, "connection_id": "conn-1"}
+    {
+      "charge_category": "llm",
+      "model": "amazon.nova-pro-v1:0",
+      "input_tokens": 100,
+      "output_tokens": 50,
+      "connection_id": "conn-1"
+    }
   ],
   "folders": [
     {
@@ -31,7 +44,11 @@
       "edge_count": 1,
       "distinct_types": 2,
       "top_entities": [
-        {"entity_type": "Organization", "surface_form": "Acme Corp", "mention_count": 2}
+        {
+          "entity_type": "Organization",
+          "surface_form": "Acme Corp",
+          "mention_count": 2
+        }
       ],
       "ontology_pack": "fibo_core",
       "ontology_version": "1.0",
@@ -43,7 +60,10 @@
       "unlocatable_entity_count": 0,
       "unmapped_property_count": 0,
       "ungrounded_fact_count": 0,
-      "guardrails_blocked_facts": 0
+      "guardrails_blocked_facts": 0,
+      "underivable_entity_count": 0,
+      "ambiguous_attachment_count": 0,
+      "unanchored_fact_count": 0
     }
   ]
 }

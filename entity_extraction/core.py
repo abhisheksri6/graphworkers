@@ -618,7 +618,8 @@ def build_summary(
     self_consistency_votes: int = 1, chunk_metadata_missing_count: int = 0,
     unresolved_reference_count: int = 0, unlocatable_entity_count: int = 0,
     unmapped_property_count: int = 0, ungrounded_fact_count: int = 0,
-    guardrails_blocked_facts: int = 0,
+    guardrails_blocked_facts: int = 0, underivable_entity_count: int = 0,
+    ambiguous_attachment_count: int = 0, unanchored_fact_count: int = 0,
 ) -> Dict:
     """The KG-AC-9 state-plane scalar summary the callback promotes (no bulk rows on state).
     *Amended v11 — `linked_count` (gazetteer-link count) is dropped with that capability.*
@@ -640,7 +641,14 @@ def build_summary(
     evidence, respectively. `guardrails_blocked_facts` (KG-AC-84) added: facts dropped by the SAME
     once-per-batch guardrails screen entity candidates already pass through — mirrors the entity
     posture, but unlike the pre-existing entity `guardrails_blocked` count (a bare `run_pipeline`
-    return value, never on the state plane), this one IS wired to the state plane from this task.*"""
+    return value, never on the state plane), this one IS wired to the state plane from this task.*
+    *Amended v15 — the derivation pass's three discard paths join KG-AC-74's enumerated family
+    (KG-AC-92/93): `underivable_entity_count` (an abstract type had content but its identity value
+    was absent — skipped, never minted under a fabricated key), `ambiguous_attachment_count`
+    (more than one hub of a type, so a constituent pairing would have to be invented — withheld),
+    and `unanchored_fact_count` (an anchored fact whose hub pairing is likewise undeterminable —
+    dropped rather than left on an anchor that does not declare the property). Each names exactly
+    one path, per the P8 audit rule.*"""
     distinct_types = len({r["entity_type"] for r in entity_rows})
     return {
         "entity_count": len(entity_rows),
@@ -658,6 +666,9 @@ def build_summary(
         "unmapped_property_count": unmapped_property_count,
         "ungrounded_fact_count": ungrounded_fact_count,
         "guardrails_blocked_facts": guardrails_blocked_facts,
+        "underivable_entity_count": underivable_entity_count,
+        "ambiguous_attachment_count": ambiguous_attachment_count,
+        "unanchored_fact_count": unanchored_fact_count,
     }
 
 

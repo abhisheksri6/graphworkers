@@ -240,3 +240,37 @@ def test_commitment_anchors_on_subscription_not_agreement():
     hub = next(r for r in derived if r["entity_type"] == "Commitment")
     assert hub["surface_form"] == "SUB-2025-041"
     assert [a["property"] for a in hub["attributes"]] == ["commitmentAmount"]
+
+
+# ---- R3: counters reach the state plane (KG-AC-92/93 x KG-AC-74) --------------------------------
+@pytest.mark.ac("KG-AC-92")
+def test_derivation_counters_reach_the_summary_end_to_end():
+    # the counters are computed inside derive_abstract_entities but only MATTER if they survive
+    # to the state plane -- P8's audit rule is about visibility, not just tallying.
+    from strategies.base import Chunk, ExtractionConfig, run_pipeline
+
+    class _Llm:
+        resolved_model = "m"
+        usage: list = []
+
+        def complete_tool(self, **_kw):
+            # two Agreements with different ids => 2 hubs => attachment withheld + counted
+            return {"entities": [{"type": "Agreement", "surface": "IMA-2025-018"},
+                                 {"type": "Agreement", "surface": "IMA-2025-019"},
+                                 {"type": "Investor", "surface": "XYZ INSURANCE GROUP PLC"}],
+                    "relations": [],
+                    "facts": [
+                        {"subject_id": 0, "property": "agreementId", "value": "IMA-2025-018",
+                         "evidence": "IMA-2025-018"},
+                        {"subject_id": 1, "property": "agreementId", "value": "IMA-2025-019",
+                         "evidence": "IMA-2025-019"},
+                    ]}
+
+    text = "IMA-2025-018 and IMA-2025-019 with XYZ INSURANCE GROUP PLC."
+    _ent, _edge, summary, _usage, _blocked = run_pipeline(
+        [Chunk("c1", text)], ExtractionConfig(engine="llm", ontology_pack="investment_fibo"),
+        _pack(), folder_id="f1", llm_client=_Llm())
+    for counter in ("underivable_entity_count", "ambiguous_attachment_count",
+                    "unanchored_fact_count"):
+        assert counter in summary, counter
+    assert summary["ambiguous_attachment_count"] > 0, "two hubs must withhold + count"

@@ -439,6 +439,7 @@ def run_pipeline(chunks: List[Chunk], config: ExtractionConfig, pack, *, folder_
                             unlocatable_entity_count=sum(unlocatable_entity_counts),
                             unmapped_property_count=unmapped_property,
                             ungrounded_fact_count=ungrounded_fact,
-                            guardrails_blocked_facts=guardrails_blocked_facts)
+                            guardrails_blocked_facts=guardrails_blocked_facts,
+                            **derived_counters)
     usage = list(getattr(llm_client, "usage", []) or [])
     return ent_rows, edge_rows, summary, usage, guardrails_blocked
