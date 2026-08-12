@@ -1,14 +1,14 @@
-"""Ontology pack schema + loader (ADR-0008, amended v13). Pure — json + validation only, no
+"""Ontology pack schema + loader (ADR-0008, amended v13 and v14). Pure — json + validation only, no
 spaCy/DB/network.
 
 A pack is a versioned, **domain-agnostic** JSON: entity types (each with a `parent` hierarchy validated
-as a DAG, per-engine mapping via `spacy_labels`, `guidance` for the LLM prompt, an OPTIONAL `iri`, and
-an OPTIONAL `abstract` flag — KG-AC-72, default false) + relations (with `domain`/`range` typing, an
-OPTIONAL `iri` — KG-AC-85) + an OPTIONAL `datatype_properties` attribute vocabulary (KG-AC-69). The
-runtime vocabulary is CLOSED — `is_known_type` gates what may be written; unknown types are dropped +
-counted by the strategies (KG-AC-14). The `parent` hierarchy drives canonicalization's type
-reconciliation (KG-AC-23). `generic`/`fibo_core` are shipped *samples*; a customer authors a custom
-pack for any domain.
+as a DAG, per-engine mapping via `spacy_labels`, `guidance` for the LLM prompt, an OPTIONAL `iri`, an
+OPTIONAL `abstract` flag — KG-AC-72, default false — and, for an abstract type, an OPTIONAL `derived`
+block — KG-AC-88, v14) + relations (with `domain`/`range` typing, an OPTIONAL `iri` — KG-AC-85) + an
+OPTIONAL `datatype_properties` attribute vocabulary (KG-AC-69). The runtime vocabulary is CLOSED —
+`is_known_type` gates what may be written; unknown types are dropped + counted by the strategies
+(KG-AC-14). The `parent` hierarchy drives canonicalization's type reconciliation (KG-AC-23).
+`generic`/`fibo_core` are shipped *samples*; a customer authors a custom pack for any domain.
 """
 from __future__ import annotations
 
@@ -36,6 +36,24 @@ class OntologyError(ValueError):
 
 
 @dataclass
+class DerivedSpec:
+    """KG-AC-88 (v14, ADR-0008 amended): declares how an abstract type is minted DETERMINISTICALLY
+    after extraction, replacing the v13 model-synthesis-and-position-reference mechanism.
+    ``identity_from`` is ``"<Type>.<datatypeProperty>"`` — a declared entity type + one of that
+    type's declared ``datatype_properties`` — the fact value that becomes the derived instance's
+    identity. ``mint_when`` is a plain declared entity-type name whose presence in the folder
+    triggers minting (no expression grammar — clarify F4: every real case is "this type is
+    present", so none is warranted). ``auto_relations`` lists declared relation types carrying
+    this abstract type in EITHER its domain or its range — clarify F1: a domain-only rule would
+    make `hasCommitment`/`hasCommercialTerms` (abstract type in range only) permanently
+    unproducible. Edge direction needs no separate field: a relation's own domain=src/range=dst
+    already fully determines it, whichever side the abstract type falls on."""
+    identity_from: str
+    mint_when: str
+    auto_relations: List[str]
+
+
+@dataclass
 class EntityType:
     type: str
     parent: Optional[str]
@@ -43,6 +61,7 @@ class EntityType:
     guidance: str
     iri: Optional[str]
     abstract: bool = False  # KG-AC-72 (v13): only an abstract type may be written span-less
+    derived: Optional[DerivedSpec] = None  # KG-AC-88 (v14): how to mint it, if at all
 
 
 @dataclass
@@ -130,6 +149,45 @@ class Pack:
         self._validate_regex_patterns()
         self._validate_dep_patterns()
         self._validate_datatype_properties()
+        self._validate_derived()
+
+    def _validate_derived(self) -> None:
+        """KG-AC-88 (v14): fail loud naming pack + type. ``identity_from`` must reference a
+        declared entity type AND one of that type's declared ``datatype_properties`` (exact
+        domain match — this pack has no subtype hierarchy to reconcile against, per ADR-0008);
+        ``mint_when`` must reference a declared entity type; every ``auto_relations`` entry must
+        be a declared relation carrying THIS abstract type in either its domain or its range
+        (clarify F1's regression guard — never domain-only)."""
+        for et in self.entity_types.values():
+            derived = et.derived
+            if derived is None:
+                continue
+            label = f"pack '{self.name}': entity type '{et.type}' derived block"
+            if "." not in derived.identity_from:
+                raise OntologyError(
+                    f"{label}: identity_from must be '<Type>.<datatypeProperty>', "
+                    f"got {derived.identity_from!r}")
+            id_type, _, id_prop = derived.identity_from.partition(".")
+            if id_type not in self.entity_types:
+                raise OntologyError(
+                    f"{label}: identity_from references undeclared type '{id_type}'")
+            prop = self.datatype_properties.get(id_prop)
+            if prop is None or prop.domain != id_type:
+                raise OntologyError(
+                    f"{label}: identity_from '{derived.identity_from}' is not a declared "
+                    f"datatype_properties entry with domain '{id_type}'")
+            if derived.mint_when not in self.entity_types:
+                raise OntologyError(
+                    f"{label}: mint_when references undeclared type '{derived.mint_when}'")
+            for rel_name in derived.auto_relations:
+                rel = self.relations.get(rel_name)
+                if rel is None:
+                    raise OntologyError(
+                        f"{label}: auto_relations entry '{rel_name}' is not a declared relation")
+                if et.type not in rel.domain and et.type not in rel.range:
+                    raise OntologyError(
+                        f"{label}: auto_relations entry '{rel_name}' carries '{et.type}' in "
+                        f"NEITHER its domain {rel.domain} nor its range {rel.range}")
 
     def _validate_datatype_properties(self) -> None:
         """KG-AC-69: every datatype_properties entry's domain is a declared entity type and its
@@ -264,8 +322,18 @@ def load_pack(name_or_path: str) -> Pack:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
         ets = [
-            EntityType(type=e["type"], parent=e.get("parent"), spacy_labels=e.get("spacy_labels", []),
-                       guidance=e.get("guidance", ""), iri=e.get("iri"), abstract=e.get("abstract", False))
+            EntityType(
+                type=e["type"], parent=e.get("parent"), spacy_labels=e.get("spacy_labels", []),
+                guidance=e.get("guidance", ""), iri=e.get("iri"), abstract=e.get("abstract", False),
+                derived=(
+                    DerivedSpec(
+                        identity_from=e["derived"]["identity_from"],
+                        mint_when=e["derived"]["mint_when"],
+                        auto_relations=list(e["derived"].get("auto_relations", [])),
+                    )
+                    if e.get("derived") is not None else None
+                ),
+            )
             for e in data["entity_types"]
         ]
         rels = [

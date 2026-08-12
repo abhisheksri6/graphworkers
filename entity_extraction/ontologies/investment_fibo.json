@@ -1,7 +1,7 @@
 {
   "name": "investment_fibo",
-  "version": "2.1",
-  "description": "Institutional Investment Relationship Ontology — translated 1:1 from the owner-supplied OWL (https://contextbuilder.ai/ontology/investment#, :InvestmentRelationshipOntology). v2.0 (2026-08-11) was a BREAKING rewrite of v1.1: the companion value types (MonetaryAmount/Date/Percentage/Identifier) and their carrier relations were REMOVED, superseded by the datatype_properties declaration (ADR-0008 amendment, spec v13). v2.1 (2026-08-11, same day) is an ADDITIVE extension only — a same-day extended OWL added 27 net-new owl:DatatypeProperty declarations (16→42 total in-OWL, 15→42 in this pack once `lei` is counted); no entity_types, no relations, and no EXISTING datatype_properties entry changed shape or was removed. See _v13_dependency, _deviations_from_source_owl and _known_gaps for what changed and why.",
+  "version": "2.2",
+  "description": "Institutional Investment Relationship Ontology — translated 1:1 from the owner-supplied OWL (https://contextbuilder.ai/ontology/investment#, :InvestmentRelationshipOntology). v2.0 (2026-08-11) was a BREAKING rewrite of v1.1: the companion value types (MonetaryAmount/Date/Percentage/Identifier) and their carrier relations were REMOVED, superseded by the datatype_properties declaration (ADR-0008 amendment, spec v13). v2.1 (2026-08-11, same day) is an ADDITIVE extension only — a same-day extended OWL added 27 net-new owl:DatatypeProperty declarations (16→42 total in-OWL, 15→42 in this pack once `lei` is counted); no entity_types, no relations, and no EXISTING datatype_properties entry changed shape or was removed. v2.2 (2026-08-12) is ALSO additive-only: the pack's own three abstract types (InvestmentRelationship, Commitment, CommercialTerms — no OWL source content, a knowledge-graph-spec v14 addition) each gain a `derived` block (KG-AC-88, ADR-0008 amended) so extraction mints them deterministically from a document-printed identifier instead of asking the LLM to synthesise an instance and a name for it; found live 2026-08-11 that the latter mechanism dropped 4 ontology-valid relations as unresolved references and wrote CommercialTerms as an orphan with zero edges on a real deployed run. See _v13_dependency, _deviations_from_source_owl and _known_gaps for what changed and why.",
   "_source_ontology": "owner-supplied OWL/RDF, :InvestmentRelationshipOntology (@prefix iiro: <https://contextbuilder.ai/ontology/investment#>). v2.0 translated the ontology received 2026-08-11. v2.1 translates an EXTENDED OWL received later the same day (2026-08-11) that adds datatype properties for CommercialTerms/FeeSchedule/Amendment/SideLetter/InvestmentManager — the exact gap v2.0's _known_gaps note flagged as missing.",
   "_v13_dependency": "UPDATED 2026-08-11 — this is no longer accurate as a blanket statement: Workstream P (spec v13) has BUILT P1 (pack loader reads datatype_properties/abstract), P5 (abstract types accepted span-less), P6 (facts[] extraction + domain/evidence validation + persistence into kg_entities.attributes, using this pack's datatype_properties), P7 (guardrails screening extended to facts), P8 (drop-accounting audit), P9 (runtime preview diagnostic parity) — conformance 77/86 as of this pack's v2.1 update. The `datatype_properties` array and the per-type `abstract` flag declared below are therefore LIVE for any deployment running current entity_extraction worker code, not inert. (Historical note, preserved for context: at the time v2.0 was authored, only the pack loader (P1) had shipped, so this note originally read 'INERT until v13 ships' — that was true then, not now.)",
   "_deviations_from_source_owl": "THREE deliberate differences, all owner-approved: (1) `lei` — the v13 clarify pass (2026-08-11) originally directed that no LEI be carried, consistent in spirit with spec v11's removal of the gazetteer/external-identifier plane. That exclusion was REVERSED the same day when the extended OWL arrived: the owner directed `lei` be DECLARED in the ontology (added below, LegalEntity, range `identifier`) — explicitly decoupled from whether it is ACTIVELY USED downstream (e.g. as a canonicalization match key); that consumption decision is deferred, not yet made. (2) Range-kind semantics: the v2.0 OWL typed every datatype property as xsd:string, including dates and monetary amounts — translating that faithfully would make `normalized_value` (KG-AC-70) a no-op, so v2.0 assigned `range` kinds SEMANTICALLY (date/number/identifier where the property clearly is one) rather than copying xsd:string uniformly. The v2.1 extended OWL itself now DIFFERENTIATES xsd:date (effectiveDate, commitmentDate, amendmentEffectiveDate, feeEffectiveDate) and xsd:decimal (commitmentAmount) from xsd:string for the rest — this pack mirrors those distinctions directly where the OWL states them, and additionally applies the SAME semantic `identifier` augmentation v2.0 established to every reference-number-shaped string field (agreementId, subscriptionId, registrationNumber, feeScheduleId, amendmentId, sideLetterId, lei) since xsd:string has no identifier concept of its own — a consistent, documented rule, not an ad hoc per-field call. (3) All 16 of the v2.0-era source's owl:DatatypeProperty declarations minus `lei` (15) plus all 27 net-new declarations from the v2.1 extended OWL (including `lei` itself) are translated — 42 of 42 declared datatype properties in the extended OWL now appear below.",
@@ -13,7 +13,12 @@
       "abstract": true,
       "spacy_labels": [],
       "guidance": "The overall institutional investment relationship between an investor and an investment manager — the central aggregate tying together the parties, the governing agreement and the subscriptions. ABSTRACT: a document never writes this as a literal phrase; name it after the parties it connects (e.g. \"<Investor> - <Manager> Investment Relationship\").",
-      "iri": "https://contextbuilder.ai/ontology/investment#InvestmentRelationship"
+      "iri": "https://contextbuilder.ai/ontology/investment#InvestmentRelationship",
+      "derived": {
+        "identity_from": "Agreement.agreementId",
+        "mint_when": "Agreement",
+        "auto_relations": ["hasInvestor", "hasInvestmentManager", "governedBy", "hasSubscription"]
+      }
     },
     {
       "type": "Investor",
@@ -56,7 +61,12 @@
       "abstract": true,
       "spacy_labels": [],
       "guidance": "The capital commitment attached to a subscription — the undertaking itself, not the numeric amount (the amount, currency, date and type are datatype properties below). ABSTRACT: documents state the figures without naming the commitment as an entity; name it after what it commits (e.g. \"<Amount> institutional subscription commitment\").",
-      "iri": "https://contextbuilder.ai/ontology/investment#Commitment"
+      "iri": "https://contextbuilder.ai/ontology/investment#Commitment",
+      "derived": {
+        "identity_from": "Subscription.subscriptionId",
+        "mint_when": "Subscription",
+        "auto_relations": ["hasCommitment"]
+      }
     },
     {
       "type": "LegalEntity",
@@ -71,7 +81,12 @@
       "abstract": true,
       "spacy_labels": [],
       "guidance": "The commercial arrangement governing an agreement — fees and related economics taken as a whole. ABSTRACT: documents describe the terms without naming them as an entity; name it after the agreement it belongs to (e.g. \"Commercial Terms for <AgreementId>\").",
-      "iri": "https://contextbuilder.ai/ontology/investment#CommercialTerms"
+      "iri": "https://contextbuilder.ai/ontology/investment#CommercialTerms",
+      "derived": {
+        "identity_from": "Agreement.agreementId",
+        "mint_when": "Agreement",
+        "auto_relations": ["hasCommercialTerms", "definedByFeeSchedule"]
+      }
     },
     {
       "type": "FeeSchedule",

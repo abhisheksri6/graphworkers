@@ -2,6 +2,7 @@
 from .loader import (
     DatatypeProperty,
     DepPattern,
+    DerivedSpec,
     EntityType,
     OntologyError,
     Pack,
@@ -14,6 +15,7 @@ from .loader import (
 __all__ = [
     "DatatypeProperty",
     "DepPattern",
+    "DerivedSpec",
     "EntityType",
     "OntologyError",
     "Pack",

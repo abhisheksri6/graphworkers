@@ -76,7 +76,7 @@ def test_entity_type_abstract_declared_true_survives_loading():
     assert p.entity_types["Deal"].abstract is True
 
 
-# ---- investment_fibo v2.1 integration (already declares all three) -------
+# ---- investment_fibo v2.2 integration (already declares all three) -------
 @pytest.mark.ac("KG-AC-69")
 def test_investment_fibo_datatype_properties_and_abstract_types_visible():
     p = load_pack("investment_fibo")
@@ -100,3 +100,28 @@ def test_investment_fibo_datatype_properties_and_abstract_types_visible():
     assert p.datatype_properties["feeScheduleId"].domain == "FeeSchedule"
     assert p.datatype_properties["amendmentId"].domain == "Amendment"
     assert p.datatype_properties["sideLetterId"].domain == "SideLetter"
+
+
+@pytest.mark.ac("KG-AC-88")
+def test_investment_fibo_v22_all_three_abstract_types_carry_derived():
+    # v2.2 (2026-08-12): each of the pack's own three abstract types gains a `derived` block
+    # (KG-AC-88) -- this pack is the real-world regression guard for Q1, not just a synthetic one.
+    p = load_pack("investment_fibo")
+    ir = p.entity_types["InvestmentRelationship"].derived
+    assert ir.identity_from == "Agreement.agreementId"
+    assert ir.mint_when == "Agreement"
+    assert set(ir.auto_relations) == {
+        "hasInvestor", "hasInvestmentManager", "governedBy", "hasSubscription",
+    }
+    commitment = p.entity_types["Commitment"].derived
+    assert commitment.identity_from == "Subscription.subscriptionId"
+    assert commitment.auto_relations == ["hasCommitment"]
+    terms = p.entity_types["CommercialTerms"].derived
+    assert terms.identity_from == "Agreement.agreementId"
+    # clarify F1's real-world proof: both of this pack's declared auto_relations carry
+    # CommercialTerms in RANGE, never domain -- a domain-only validator would have rejected
+    # this exact, already-shipped pack content.
+    assert set(terms.auto_relations) == {"hasCommercialTerms", "definedByFeeSchedule"}
+    for rel_name in terms.auto_relations:
+        rel = p.relations[rel_name]
+        assert "CommercialTerms" in rel.domain or "CommercialTerms" in rel.range
