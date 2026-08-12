@@ -26,3 +26,15 @@ def test_scalar_outputs_present():
     out = CAPABILITY_SCHEMA["output_fields"]
     for f in ("canonical_count", "merged_count", "minted_count"):
         assert out[f]["always_present"] is True
+
+
+@pytest.mark.ac("KG-AC-82")
+def test_canonicalized_entities_output_declares_the_canonical_graph_shape():
+    # P16 (KG-AC-82): the contract must name the canonical-graph fields P10-P13 actually put on
+    # kg_canonical_entities (canonical_key/canonical_name/aliases/attributes+status) -- before this
+    # task the description said only "transitioned staged->canonicalized with canonical_id", which
+    # was true at v11 but silently stale after P10-P13 landed.
+    desc = CAPABILITY_SCHEMA["artifact_outputs"]["canonicalized_entities"]["description"]
+    for term in ("canonical_key", "canonical_name", "aliases", "attributes",
+                 "single_source", "consistent", "conflicting"):
+        assert term in desc, f"canonical-graph shape term {term!r} missing from the output contract"

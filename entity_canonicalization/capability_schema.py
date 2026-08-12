@@ -40,7 +40,19 @@ CAPABILITY_SCHEMA: Dict[str, Any] = {
     },
     "artifact_outputs": {
         "canonicalized_entities": {"stage": "canonicalized",
-                                   "description": "entity_records transitioned staged->canonicalized with canonical_id",
+                                   "description": (
+                                       "entity_records transitioned staged->canonicalized with "
+                                       "canonical_id, plus the canonical-graph row each canonical_id "
+                                       "now carries on kg_canonical_entities: canonical_key "
+                                       "(<entity-type-slug>:<canonical-name-slug>, stable across runs, "
+                                       "KG-AC-79), canonical_name + aliases (the cluster's longest "
+                                       "surface form + every other distinct surface seen, recomputed "
+                                       "from the full current cluster on every mint/merge, KG-AC-76/77), "
+                                       "and attributes (facts merged across every mention sharing the "
+                                       "canonical_id, one entry per distinct normalized_value per "
+                                       "property, each carrying a status of single_source|consistent|"
+                                       "conflicting plus its provenance, KG-AC-78/80)"
+                                   ),
                                    "artifact_type": "entity_records", "always_present": True},
     },
 }
