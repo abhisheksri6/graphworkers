@@ -10,6 +10,13 @@ provenance (always null here — a synthetic preview chunk carries no real chunk
 own null-on-absence rule), and every KG-AC-74 drop counter (+ P7's ``guardrails_blocked_facts``) —
 read straight off the SAME ``summary``/``ent_rows``/``edge_rows`` production already builds, never a
 second, divergent computation.
+
+*(Amended v15, clarify F7 — found live 2026-08-12 running Q5's end-to-end verification: each
+entity also carries ``is_abstract`` (v13), ``extractor`` (v14 — so a ``"derived"`` row is
+distinguishable), and ``reference_only`` (v15); the summary passthrough gains R3's three v15
+counters. This dict comprehension is a hand-maintained field list, not the raw row — a field added
+to ``core.py``'s entity dict does NOT automatically reach here, exactly the gap this amendment
+closes.)*
 """
 from __future__ import annotations
 
@@ -49,7 +56,10 @@ def run_preview(config_dict: Dict[str, Any], sample_text: Optional[str], *,
             {"surface_form": e["surface_form"], "entity_type": e["entity_type"],
              "span_start": e["span_start"], "span_end": e["span_end"],
              "confidence": e["confidence"],
-             "source_doc_id": e["source_doc_id"], "page": e["page"]}  # KG-AC-75
+             "source_doc_id": e["source_doc_id"], "page": e["page"],  # KG-AC-75
+             "is_abstract": e["is_abstract"],                          # KG-AC-75 (v15, clarify F7)
+             "extractor": e.get("extractor"),                         # KG-AC-75 (v15, clarify F7)
+             "reference_only": e.get("reference_only", False)}        # KG-AC-75 (v15, clarify F7)
             for e in ent_rows
         ],
         "relations": [
@@ -71,4 +81,8 @@ def run_preview(config_dict: Dict[str, Any], sample_text: Optional[str], *,
         "unlocatable_entity_count": summary["unlocatable_entity_count"],
         "ungrounded_fact_count": summary["ungrounded_fact_count"],
         "guardrails_blocked_facts": summary["guardrails_blocked_facts"],
+        # KG-AC-75 (v15, clarify F7): R3's three derivation-pass discard counters
+        "underivable_entity_count": summary["underivable_entity_count"],
+        "ambiguous_attachment_count": summary["ambiguous_attachment_count"],
+        "unanchored_fact_count": summary["unanchored_fact_count"],
     }

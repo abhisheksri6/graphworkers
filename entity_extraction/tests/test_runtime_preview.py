@@ -109,3 +109,30 @@ def test_today_s_fields_are_unaffected():
     assert out["relations"][0]["dst"] == "Acme LLC"
     assert out["ontology_pack"] == "investment_fibo"
     assert out["unmapped_type_count"] == 0
+
+
+@pytest.mark.ac("KG-AC-75")
+def test_preview_entities_carry_all_three_provenance_markers():
+    # v15 clarify F7: is_abstract (v13), extractor (v14), reference_only (v15) all belong on the
+    # ONE surface an operator actually reads -- found live 2026-08-12 running Q5's end-to-end
+    # verification: run_preview's entity dict comprehension is a hardcoded field list that was
+    # never updated when any of the three were added, so the underlying rows carried them
+    # (core.py) while the API response silently dropped them.
+    out = _preview()
+    hub = next(e for e in out["entities"] if e["entity_type"] == "InvestmentRelationship")
+    assert hub["is_abstract"] is True
+    assert hub["extractor"] == "derived"
+    assert hub["reference_only"] is False
+    concrete = next(e for e in out["entities"] if e["entity_type"] == "Agreement")
+    assert concrete["is_abstract"] is False
+    assert "reference_only" in concrete  # present even when false -- KG-AC-75 says "carries", not "when true"
+
+
+@pytest.mark.ac("KG-AC-75")
+def test_preview_summary_carries_all_v15_counters():
+    # same finding, the state-plane half: R3 added these three to build_summary/_STATE_SCALARS but
+    # runtime.py's summary passthrough dict was never extended to include them.
+    out = _preview()
+    for counter in ("underivable_entity_count", "ambiguous_attachment_count",
+                    "unanchored_fact_count"):
+        assert counter in out, counter
