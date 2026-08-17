@@ -72,7 +72,7 @@ def batch_pack_name(cur, folder_ids: Optional[Sequence[str]] = None) -> Optional
 
 
 def read_canonical_graph(
-    cur, folder_ids: Optional[Sequence[str]] = None, pack=None,
+    cur, folder_ids: Optional[Sequence[str]] = None, pack=None, graph_scope: Optional[str] = None,
 ) -> Tuple[List[CanonicalNode], List[CanonicalEdge]]:
     """KG-AC-83/86 (v13): ``pack`` (optional — the CALLER's already-loaded ontology pack via
     `ontologies.load_pack(batch_pack_name(...))`, matching the entity_canonicalization worker's own
@@ -80,10 +80,19 @@ def read_canonical_graph(
     itself) resolves each node's/edge's `iri` for the ontology-qualified export. No pack (or an
     unknown entity_type/relation_type within it) simply exports bare names (KG-AC-86's own "not an
     error" clause) — never fails the export."""
+    # v16 (KG-AC-97): EVERY export read is scope-filtered. The rebuild path (`folder_ids=None`,
+    # KG-AC-28) is the one that makes this load-bearing rather than redundant: without the filter it
+    # reads every scope's canonical rows and MERGEs another department's graph into this database.
+    # The folder-scoped path is implicitly single-scope (the worker validates that), but is filtered
+    # too so there is ONE rule rather than a path that happens to be safe.
+    filters, params = [], []
     if folder_ids:
-        cur.execute(_NODE_SQL.format(node_filter="AND e.folder_id = ANY(%s)"), (list(folder_ids),))
-    else:
-        cur.execute(_NODE_SQL.format(node_filter=""))
+        filters.append("AND e.folder_id = ANY(%s)")
+        params.append(list(folder_ids))
+    if graph_scope:
+        filters.append("AND ce.graph_scope = %s")
+        params.append(graph_scope)
+    cur.execute(_NODE_SQL.format(node_filter=" ".join(filters)), tuple(params))
     nodes = [
         CanonicalNode(
             canonical_id=str(r[0]), entity_type=r[1], normalized_form=r[2], attributes=r[3] or {},
@@ -99,16 +108,16 @@ def read_canonical_graph(
         for r in cur.fetchall()
     ]
 
+    edge_filters, edge_params = [], []
     if folder_ids:
         node_ids = [n.canonical_id for n in nodes]
-        cur.execute(
-            _EDGE_SQL.format(
-                edge_filter="WHERE src_canonical_id::text = ANY(%s) OR dst_canonical_id::text = ANY(%s)"
-            ),
-            (node_ids, node_ids),
-        )
-    else:
-        cur.execute(_EDGE_SQL.format(edge_filter=""))
+        edge_filters.append("(src_canonical_id::text = ANY(%s) OR dst_canonical_id::text = ANY(%s))")
+        edge_params.extend([node_ids, node_ids])
+    if graph_scope:  # KG-AC-97 — same rule on the edge read
+        edge_filters.append("graph_scope = %s")
+        edge_params.append(graph_scope)
+    where = ("WHERE " + " AND ".join(edge_filters)) if edge_filters else ""
+    cur.execute(_EDGE_SQL.format(edge_filter=where), tuple(edge_params))
     edges = [
         CanonicalEdge(
             src_canonical_id=str(r[0]), relation_type=r[1], dst_canonical_id=str(r[2]),

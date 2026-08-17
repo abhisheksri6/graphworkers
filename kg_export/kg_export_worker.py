@@ -121,7 +121,8 @@ def process_export(task_id, folder_ids: Sequence[str], kg_export_config, dag_id,
                 pack = load_pack(pack_name) if pack_name else None
             except Exception:  # noqa: BLE001 — an unloadable pack degrades to bare names, never fails export
                 pack = None
-            nodes, edges = store.read_canonical_graph(cur, folder_ids, pack=pack)
+            nodes, edges = store.read_canonical_graph(cur, folder_ids, pack=pack,
+                                                      graph_scope=graph_scope)
             keep_ids = store.scope_canonical_ids(cur, graph_scope) if graph_scope else []
 
         exp_cm = exporter if exporter is not None else Neo4jExporter(connection_id, database=cfg.get("database"))
