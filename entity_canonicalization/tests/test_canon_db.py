@@ -143,7 +143,10 @@ def test_batch_collapses_dupes_single_instance_and_scoped(conn):
         # KG-AC-22 idempotent: a re-run finds nothing staged -> no-op
         summary2 = canonicalize_batch(_DbShim(conn), [fa, fb], pack=FIBO)
         conn.commit()
-        assert summary2 == {"canonical_count": 0, "merged_count": 0, "minted_count": 0}
+        # v16 S7: the summary carries the retraction counts on every path, so the shape is the
+        # same whether or not there was work to do.
+        assert summary2 == {"canonical_count": 0, "merged_count": 0, "minted_count": 0,
+                            "retracted_entity_count": 0, "retracted_edge_count": 0}
     finally:
         _cleanup(conn, [fa, fb, fc], ["investmentadviser:acme", "organization:acme", "organization:globex"])
 

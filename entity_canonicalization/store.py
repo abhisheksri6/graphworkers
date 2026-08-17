@@ -349,6 +349,45 @@ def aggregate_canonical_edges(cur, entity_uids: Sequence[str], graph_scope: str 
     return len(triples)
 
 
+def retract_orphans(cur, graph_scope: str) -> Tuple[int, int]:
+    """KG-AC-105 (Postgres half): remove canonical rows this scope no longer has evidence for.
+    Returns (edges_removed, entities_removed).
+
+    Why it cannot be folded into `aggregate_canonical_edges`: that function derives its work list
+    from the mention-edges that CURRENTLY exist, so a canonical edge whose contributors have all
+    disappeared is never visited by it — the vanished row is precisely the one no longer reachable
+    from the data. Retraction therefore has to look from the canonical side inwards.
+
+    Runs inside the batch transaction (KG-AC-40), so an abort restores everything it removed; and
+    it is scope-local, so a batch can never reach into another tenant's partition. Edges first —
+    they reference the canonical entities."""
+    cur.execute(
+        """DELETE FROM public.kg_canonical_edges ce
+            WHERE ce.graph_scope = %s
+              AND NOT EXISTS (
+                  SELECT 1
+                    FROM public.kg_edges ed
+                    JOIN public.kg_entities se ON se.entity_uid = ed.src_entity_uid
+                    JOIN public.kg_entities de ON de.entity_uid = ed.dst_entity_uid
+                   WHERE se.canonical_id = ce.src_canonical_id
+                     AND de.canonical_id = ce.dst_canonical_id
+                     AND ed.relation_type = ce.relation_type
+              )""",
+        (graph_scope,),
+    )
+    edges_removed = cur.rowcount
+
+    cur.execute(
+        """DELETE FROM public.kg_canonical_entities c
+            WHERE c.graph_scope = %s
+              AND NOT EXISTS (
+                  SELECT 1 FROM public.kg_entities e WHERE e.canonical_id = c.canonical_id
+              )""",
+        (graph_scope,),
+    )
+    return edges_removed, cur.rowcount
+
+
 def canonicalize_batch(db, folder_ids: Sequence[str], *, fuzzy_floor: float = _DEFAULT_FLOOR,
                        fuzzy_ceiling: float = _DEFAULT_CEILING, pack=None,
                        adjudicate: Optional[Callable[[Mention, Mention], bool]] = None) -> Dict[str, int]:
@@ -365,12 +404,14 @@ def canonicalize_batch(db, folder_ids: Sequence[str], *, fuzzy_floor: float = _D
         # anything, so a concurrent same-scope batch cannot interleave with the resolve/recompute.
         graph_scope = batch_graph_scope(cur, folder_ids)
         if graph_scope is None:
-            return {"canonical_count": 0, "merged_count": 0, "minted_count": 0}
+            return {"canonical_count": 0, "merged_count": 0, "minted_count": 0,
+                    "retracted_entity_count": 0, "retracted_edge_count": 0}
         _lock_scope(cur, graph_scope)
 
         mentions = read_staged_mentions(cur, folder_ids, pack)
         if not mentions:
-            return {"canonical_count": 0, "merged_count": 0, "minted_count": 0}
+            return {"canonical_count": 0, "merged_count": 0, "minted_count": 0,
+                    "retracted_entity_count": 0, "retracted_edge_count": 0}
 
         # v16 (KG-AC-102): the pack MUST reach clustering — the type-compatibility rule is what
         # lets `Organization` and its subtype `InvestmentAdviser` be recognised as one entity
@@ -422,4 +463,11 @@ def canonicalize_batch(db, folder_ids: Sequence[str], *, fuzzy_floor: float = _D
         # SAME transaction (KG-AC-40 — a failure anywhere above rolls this back too).
         aggregate_canonical_edges(cur, [m.entity_uid for m in mentions], graph_scope)
 
-    return {"canonical_count": len(canonical_ids), "merged_count": merged, "minted_count": minted}
+        # KG-AC-105: the plane of record converges instead of accumulating. A reprocessed folder
+        # leaves canonical rows backed by nothing (its mentions were replaced wholesale by
+        # extraction's partition replace), and pre-v16 those stayed forever — the "nothing ever
+        # retracts" finding. Same transaction as everything above, so an abort restores them.
+        retracted_edges, retracted_entities = retract_orphans(cur, graph_scope)
+
+    return {"canonical_count": len(canonical_ids), "merged_count": merged, "minted_count": minted,
+            "retracted_entity_count": retracted_entities, "retracted_edge_count": retracted_edges}
