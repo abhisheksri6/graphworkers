@@ -234,27 +234,34 @@ def assign_occurrence_indices(candidates: List[Candidate]) -> List[Candidate]:
 
 
 def compute_entity_uid(
-    folder_id: str, source_chunk_id: str, entity_type: str, surface_form: str,
+    graph_scope: str, folder_id: str, source_chunk_id: str, entity_type: str, surface_form: str,
     span_start: Optional[int], occurrence_idx: int,
 ) -> str:
-    """Deterministic per-mention identity (KG-AC-10). run_id is deliberately EXCLUDED so re-runs
-    converge. ``entity_uid = sha256(folder_id|source_chunk_id|entity_type|surface_form|
-    COALESCE(span_start,'')|occurrence_idx)``."""
+    """Deterministic per-mention identity (KG-AC-10, amended v16). run_id is deliberately EXCLUDED
+    so re-runs converge. ``entity_uid = sha256(graph_scope|folder_id|source_chunk_id|entity_type|
+    surface_form|COALESCE(span_start,'')|occurrence_idx)``.
+
+    ``graph_scope`` leads because it is part of the mention's IDENTITY, not a label attached
+    afterwards: `entity_uid` carries a UNIQUE index, so without it two scopes extracting the same
+    document would collide on every row and one department would silently overwrite the other's."""
     parts = [
-        folder_id, source_chunk_id, entity_type, surface_form,
+        graph_scope, folder_id, source_chunk_id, entity_type, surface_form,
         "" if span_start is None else str(span_start), str(occurrence_idx),
     ]
     return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()
 
 
-def compute_derived_entity_uid(folder_id: str, entity_type: str, identity_value: str) -> str:
+def compute_derived_entity_uid(
+    graph_scope: str, folder_id: str, entity_type: str, identity_value: str,
+) -> str:
     """KG-AC-90 (v15): identity for a DERIVED instance is **structural**, not textual —
-    ``sha256(folder_id|entity_type|identity_value)``. Deliberately excludes chunk, span and
-    occurrence (all of which a derived instance has none of, being document-scoped) and above all
-    excludes any composed NAME: `entity_canonicalization.canonical_key` is
-    ``<entity_type>|<normalized_form>``, so a model-composed name would make the same real-world
-    relationship resolve to different keys across documents and split one canonical hub into two."""
-    parts = [folder_id, entity_type, identity_value]
+    ``sha256(graph_scope|folder_id|entity_type|identity_value)`` (scope added v16, KG-AC-10, for the
+    same collision reason as above). Deliberately excludes chunk, span and occurrence (all of which
+    a derived instance has none of, being document-scoped) and above all excludes any composed
+    NAME: `entity_canonicalization.canonical_key` is ``<entity_type>|<normalized_form>``, so a
+    model-composed name would make the same real-world relationship resolve to different keys
+    across documents and split one canonical hub into two."""
+    parts = [graph_scope, folder_id, entity_type, identity_value]
     return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()
 
 
@@ -268,7 +275,8 @@ def build_entity_records(
     folder_id: str, merged: List[Candidate], ontology_pack: str, ontology_version: str,
     model_id: Optional[str] = None,
     chunk_provenance: Optional[Dict[str, Tuple[Optional[str], Optional[int]]]] = None,
-) -> List[Dict]:
+    *, graph_scope: str = "",
+) ->List[Dict]:
     """Turn merged candidates into staged kg_entities row dicts (extraction-owned fields).
     normalized_form / canonical_id are left for canonicalization. run_id/dag_id are added by the
     worker at store time. KG-AC-73 (v13): `chunk_provenance` (chunk_id -> (doc_id, page)) stamps
@@ -278,11 +286,13 @@ def build_entity_records(
     rows: List[Dict] = []
     for c in merged:
         uid = compute_entity_uid(
-            folder_id, c.source_chunk_id, c.entity_type, c.surface_form, c.span_start, c.occurrence_idx
+            graph_scope, folder_id, c.source_chunk_id, c.entity_type, c.surface_form,
+            c.span_start, c.occurrence_idx
         )
         doc_id, page = chunk_provenance.get(c.source_chunk_id, (None, None))
         rows.append({
             "entity_uid": uid,
+            "graph_scope": graph_scope,  # KG-AC-97 — the tenancy partition this row belongs to
             "entity_type": c.entity_type,
             "surface_form": c.surface_form,
             "source_chunk_id": c.source_chunk_id,
@@ -391,7 +401,8 @@ def _representative_constituents(entity_rows: List[Dict], wanted_types: Sequence
 
 def derive_abstract_entities(
     folder_id: str, entity_rows: List[Dict], pack, ontology_pack: str, ontology_version: str,
-) -> Tuple[List[Dict], List[Dict], Dict[str, int]]:
+    *, graph_scope: str = "",
+) ->Tuple[List[Dict], List[Dict], Dict[str, int]]:
     """KG-AC-90/91 (v15): mint pack-declared abstract types DETERMINISTICALLY after extraction and
     attach their definitional edges. Runs AFTER ``attach_facts_to_entity_records`` (the identity
     value IS a fact) and BEFORE ``build_edge_records``.
@@ -481,7 +492,8 @@ def derive_abstract_entities(
 
         for value in identity_values:
             derived_rows.append({
-                "entity_uid": compute_derived_entity_uid(folder_id, etype, value),
+                "entity_uid": compute_derived_entity_uid(graph_scope, folder_id, etype, value),
+                "graph_scope": graph_scope,       # KG-AC-97 — derived rows are scoped like any other
                 "entity_type": etype,
                 "surface_form": value,           # the identity value itself, NEVER a composed name
                 "source_chunk_id": None,          # document-scoped, not chunk-scoped

@@ -19,7 +19,7 @@ def test_zero_entities_is_success_empty_graph():
     pack = load_pack("fibo_core")
     ent, edge, summary, usage, blocked = run_pipeline(
         [Chunk("c1", "nothing notable here")],
-        ExtractionConfig(engine="llm", ontology_pack="fibo_core"), pack,
+        ExtractionConfig(engine="llm", ontology_pack="fibo_core", graph_scope="s"), pack,
         folder_id="f1", llm_client=_FakeLlm(),
     )
     assert ent == [] and edge == []
@@ -62,7 +62,7 @@ def test_process_folder_zero_entities_posts_success():
 
     import entity_extraction_worker as w
     payload = w.process_folder(
-        "t", "f1", {"engine": "llm", "ontology_pack": "fibo_core", "connection_id": "c"}, "d", "r",
+        "t", "f1", {"engine": "llm", "ontology_pack": "fibo_core", "connection_id": "c", "graph_scope": "s"}, "d", "r",
         storage=_FakeStorage(), db=_FakeDb(), http_post=http_post, worker_results_url="http://x",
         llm_client=_FakeLlm(),
     )

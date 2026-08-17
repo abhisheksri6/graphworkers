@@ -47,6 +47,11 @@ class Chunk:
 class ExtractionConfig:
     engine: str = "spacy"                 # spacy | llm
     ontology_pack: str = "generic"
+    graph_scope: str = ""                 # KG-AC-97 — the registered kg_scope this pipeline writes
+                                          # into. Empty is an INVALID sentinel, never a usable
+                                          # default: the backend refuses to save a profile without
+                                          # a resolvable scope (KG-AC-98), and `store.partition_
+                                          # replace` fails loud rather than persist unscoped rows.
     confidence_threshold: float = 0.0
     promote_top_n: int = 10
     entity_types: Optional[List[str]] = None   # optional subset filter over the pack's types
@@ -69,6 +74,7 @@ class ExtractionConfig:
         return cls(
             engine=d.get("engine", "spacy"),
             ontology_pack=d.get("ontology_pack", "generic"),
+            graph_scope=d.get("graph_scope", ""),
             confidence_threshold=float(d.get("confidence_threshold", 0.0)),
             promote_top_n=int(d.get("promote_top_n", 10)),
             entity_types=d.get("entity_types"),
@@ -310,8 +316,11 @@ def run_pipeline(chunks: List[Chunk], config: ExtractionConfig, pack, *, folder_
         unlocatable_entity_sink=unlocatable_entity_counts,
         facts_sink=facts_lists,
     )
-    if config.coreference_enabled:
-        candidates = filter_bare_pronouns(candidates)
+    # KG-AC-106 (v16): UNCONDITIONAL. A bare anaphor ("it", "the Company") is never a valid entity,
+    # whatever produced it — and gating this on `coreference_enabled` (default OFF, so the usual
+    # configuration) let leaked generic mentions become real rows and then their own spurious
+    # canonical nodes at resolution. The pre-v16 gate is removed, not weakened.
+    candidates = filter_bare_pronouns(candidates)
     # the LLM model id is known only after the client resolves its connection (on first call)
     model_id = getattr(llm_client, "resolved_model", None) if llm_client is not None else None
     kept, unmapped = filter_closed_vocab(candidates, config, pack)
@@ -329,7 +338,8 @@ def run_pipeline(chunks: List[Chunk], config: ExtractionConfig, pack, *, folder_
     assign_occurrence_indices(kept)
     merged = merge_candidates(kept)
     ent_rows = build_entity_records(folder_id, merged, config.ontology_pack, pack.version,
-                                    model_id=model_id, chunk_provenance=chunk_provenance)
+                                    model_id=model_id, chunk_provenance=chunk_provenance,
+                                    graph_scope=config.graph_scope)
 
     # KG-AC-64 (evolve v12): every LLM relation mode needs chunk text for evidence grounding, not
     # just classify's candidate-pair prompt — built once, unconditionally.
@@ -349,7 +359,8 @@ def run_pipeline(chunks: List[Chunk], config: ExtractionConfig, pack, *, folder_
     # IS a fact, so nothing is derivable before facts land) and BEFORE build_edge_records (the
     # derived rows must be in ent_rows for their edges to survive the dangling-endpoint drop).
     derived_rows, derived_edges, derived_counters = derive_abstract_entities(
-        folder_id, ent_rows, pack, config.ontology_pack, pack.version)
+        folder_id, ent_rows, pack, config.ontology_pack, pack.version,
+        graph_scope=config.graph_scope)
     ent_rows = ent_rows + derived_rows
     # KG-AC-94 (v15): computed from ATTACHED facts, so strictly after derivation's re-parenting —
     # an anchor whose bundle attributes have just moved off it must not be mis-flagged as an

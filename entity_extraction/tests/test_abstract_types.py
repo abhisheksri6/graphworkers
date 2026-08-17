@@ -54,8 +54,8 @@ def test_build_entity_records_writes_is_abstract():
 def test_compute_entity_uid_stays_deterministic_with_null_span():
     # verified at clarify: no change needed here -- COALESCE already handles it. Locked as a
     # regression guard.
-    uid1 = compute_entity_uid("f1", "c1", "InvestmentRelationship", "X - Y Investment Relationship", None, 0)
-    uid2 = compute_entity_uid("f1", "c1", "InvestmentRelationship", "X - Y Investment Relationship", None, 0)
+    uid1 = compute_entity_uid("s", "f1", "c1", "InvestmentRelationship", "X - Y Investment Relationship", None, 0)
+    uid2 = compute_entity_uid("s", "f1", "c1", "InvestmentRelationship", "X - Y Investment Relationship", None, 0)
     assert uid1 == uid2
     assert isinstance(uid1, str) and len(uid1) == 64  # sha256 hex digest
 

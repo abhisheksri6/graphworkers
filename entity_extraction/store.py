@@ -35,21 +35,46 @@ def read_chunks(storage, folder_id: str) -> List[Chunk]:
 
 
 def partition_replace(db, folder_id: str, run_id: Any, dag_id: Any, source_task_id: Any,
-                      entity_rows: List[Dict], edge_rows: List[Dict]) -> Tuple[int, int]:
-    """One-transaction partition replace for a folder (KG-AC-10). Returns (entity_count, edge_count).
-    Runs on the raw psycopg2 connection behind the injected SQLAlchemy session, so it shares the
-    task's transaction (the wrapper commits on success / rolls back on failure)."""
+                      entity_rows: List[Dict], edge_rows: List[Dict], *,
+                      graph_scope: str) -> Tuple[int, int]:
+    """One-transaction partition replace for a folder WITHIN ONE SCOPE (KG-AC-10/97). Returns
+    (entity_count, edge_count). Runs on the raw psycopg2 connection behind the injected SQLAlchemy
+    session, so it shares the task's transaction (the wrapper commits on success / rolls back on
+    failure).
+
+    ``graph_scope`` is passed explicitly rather than read off the rows: it must scope the DELETE
+    too (which runs even when there are zero rows to write), and one source of truth for the
+    column means an in-memory row can never disagree with the partition it lands in.
+
+    **This is the write chokepoint that makes the scope non-optional (KG-AC-97).** The pure builders
+    in `core` default it to `""` so the 100+ in-memory construction sites in tests need no scope
+    they do not care about — but nothing may ever be PERSISTED unscoped, so an empty scope fails
+    loud here rather than silently landing rows in a partition nothing reads. (Distinct from giving
+    the DB column a DEFAULT, which would let an omission succeed — this cannot.)"""
+    if not graph_scope:
+        raise ValueError(
+            "partition_replace requires a graph_scope — refusing to write unscoped kg rows "
+            "(KG-AC-97); the profile's graph_scope did not reach the worker"
+        )
     conn = db.connection().connection  # raw psycopg2 conn, same transaction as the session
     with conn.cursor() as cur:
-        # DELETE the folder partition — edges first (FK), then entities.
-        cur.execute("DELETE FROM public.kg_edges WHERE folder_id = %s", (folder_id,))
-        cur.execute("DELETE FROM public.kg_entities WHERE folder_id = %s", (folder_id,))
+        # DELETE this folder's partition IN THIS SCOPE — edges first (FK), then entities.
+        # Scoping the delete is what lets one document be processed into several scopes: pre-v16
+        # this keyed on folder_id alone, so a second scope's run wiped the first scope's rows.
+        cur.execute(
+            "DELETE FROM public.kg_edges WHERE folder_id = %s AND graph_scope = %s",
+            (folder_id, graph_scope),
+        )
+        cur.execute(
+            "DELETE FROM public.kg_entities WHERE folder_id = %s AND graph_scope = %s",
+            (folder_id, graph_scope),
+        )
 
         uid_to_id: Dict[str, int] = {}
         if entity_rows:
             ent_values = [
                 (
-                    folder_id, run_id, dag_id, source_task_id,
+                    folder_id, graph_scope, run_id, dag_id, source_task_id,
                     e["entity_uid"], e["entity_type"], e["surface_form"], e.get("source_chunk_id"),
                     e.get("source_doc_id"), e.get("page"), e.get("is_abstract", False),
                     e.get("span_start"), e.get("span_end"), e.get("occurrence_idx", 0),
@@ -62,7 +87,7 @@ def partition_replace(db, folder_id: str, run_id: Any, dag_id: Any, source_task_
             ]
             returned = execute_values(cur, """
                 INSERT INTO public.kg_entities
-                  (folder_id, run_id, dag_id, source_task_id, entity_uid, entity_type, surface_form,
+                  (folder_id, graph_scope, run_id, dag_id, source_task_id, entity_uid, entity_type, surface_form,
                    source_chunk_id, source_doc_id, page, is_abstract, span_start, span_end, occurrence_idx, confidence,
                    extractor, ontology_pack, ontology_version, model_id, stage, attributes,
                    reference_only, declared_aliases)
@@ -88,26 +113,30 @@ def partition_replace(db, folder_id: str, run_id: Any, dag_id: Any, source_task_
         if valid_edges:
             edge_values = [
                 (
-                    folder_id, run_id, dag_id, source_task_id,
+                    folder_id, graph_scope, run_id, dag_id, source_task_id,
                     e["edge_uid"], e["relation_type"],
                     uid_to_id[e["src_entity_uid"]], uid_to_id[e["dst_entity_uid"]],
                     e["src_entity_uid"], e["dst_entity_uid"], e.get("confidence", 1.0),
                     e.get("evidence_text"), e.get("source_doc_id"), e.get("page"),
+                    # KG-AC-56: the producing layer ('llm' | 'rules' | 'rules+llm' | 'derived').
+                    # Computed since v8 and dropped here until v16, because the column did not
+                    # exist — so a derived edge was indistinguishable from a read one in the DB.
+                    e.get("extractor"),
                 )
                 for e in valid_edges
             ]
             execute_values(cur, """
                 INSERT INTO public.kg_edges
-                  (folder_id, run_id, dag_id, source_task_id, edge_uid, relation_type,
+                  (folder_id, graph_scope, run_id, dag_id, source_task_id, edge_uid, relation_type,
                    src_entity_id, dst_entity_id, src_entity_uid, dst_entity_uid, confidence,
-                   evidence_text, source_doc_id, page)
+                   evidence_text, source_doc_id, page, extractor)
                 VALUES %s
                 ON CONFLICT (edge_uid) DO UPDATE SET
                   relation_type=EXCLUDED.relation_type, src_entity_id=EXCLUDED.src_entity_id,
                   dst_entity_id=EXCLUDED.dst_entity_id, run_id=EXCLUDED.run_id,
                   dag_id=EXCLUDED.dag_id, confidence=EXCLUDED.confidence,
                   evidence_text=EXCLUDED.evidence_text, source_doc_id=EXCLUDED.source_doc_id,
-                  page=EXCLUDED.page
+                  page=EXCLUDED.page, extractor=EXCLUDED.extractor
             """, edge_values, page_size=500)
             edge_count = len(valid_edges)
 

@@ -137,7 +137,7 @@ def test_partition_replace_writes_evidence_text(conn):
                    confidence=0.7, evidence_text="Acme Corp issues Acme 5% 2030.")
     edge_rows = build_edge_records(folder_id, [rel], entity_uid_key_map(ent_rows))
     try:
-        partition_replace(_DbShim(conn), folder_id, "run-1", "dag-1", task_id, ent_rows, edge_rows)
+        partition_replace(_DbShim(conn), folder_id, "run-1", "dag-1", task_id, ent_rows, edge_rows, graph_scope="s")
         conn.commit()
         with conn.cursor() as cur:
             cur.execute(

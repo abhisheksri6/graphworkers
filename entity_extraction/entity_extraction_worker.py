@@ -155,7 +155,8 @@ def process_folder(task_id, folder_id, entity_extraction_config, dag_id, run_id,
             spacy_model_path=spacy_model_path or settings.spacy_model_path,
             llm_client=llm_client, guardrails_screen=guardrails_screen,
         )
-        store.partition_replace(db, folder_id, run_id, dag_id, task_id, ent_rows, edge_rows)
+        store.partition_replace(db, folder_id, run_id, dag_id, task_id, ent_rows, edge_rows,
+                                graph_scope=config.graph_scope)
         cb.log_result_summary(logger, folder_id, len(chunks), summary)
     except Exception as exc:  # noqa: BLE001 — worker boundary: fail THIS folder loud, POST the error
         status, error_message, summary, usage = "failed", str(exc), None, []

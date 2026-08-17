@@ -32,11 +32,11 @@ def _attr(prop, value):
 # ---- structural identity (KG-AC-90) -------------------------------------------------------------
 @pytest.mark.ac("KG-AC-90")
 def test_derived_uid_is_structural_and_deterministic():
-    a = compute_derived_entity_uid("f1", "InvestmentRelationship", "IMA-2025-018")
-    b = compute_derived_entity_uid("f1", "InvestmentRelationship", "IMA-2025-018")
+    a = compute_derived_entity_uid("s", "f1", "InvestmentRelationship", "IMA-2025-018")
+    b = compute_derived_entity_uid("s", "f1", "InvestmentRelationship", "IMA-2025-018")
     assert a == b and len(a) == 64
     # a different identity value is a different entity; no NAME ever enters the hash
-    assert a != compute_derived_entity_uid("f1", "InvestmentRelationship", "IMA-2025-019")
+    assert a != compute_derived_entity_uid("s", "f1", "InvestmentRelationship", "IMA-2025-019")
 
 
 @pytest.mark.ac("KG-AC-90")

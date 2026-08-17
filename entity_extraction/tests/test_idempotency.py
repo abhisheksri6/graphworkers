@@ -79,7 +79,7 @@ def test_partition_replace_idempotent_with_provenance(conn):
     ent_rows, edge_rows = _build_rows(folder_id)
     try:
         # Run 1
-        n_e, n_ed = partition_replace(_DbShim(conn), folder_id, "run-1", "dag-1", task_id, ent_rows, edge_rows)
+        n_e, n_ed = partition_replace(_DbShim(conn), folder_id, "run-1", "dag-1", task_id, ent_rows, edge_rows, graph_scope="s")
         conn.commit()
         assert (n_e, n_ed) == (3, 2)
         with conn.cursor() as cur:
@@ -93,7 +93,7 @@ def test_partition_replace_idempotent_with_provenance(conn):
             assert pack == "fibo_core" and ver == "1.0" and extractor in ("regex", "spacy", "llm")
 
         # Run 2 (re-execute for the SAME folder; run_id differs) -> identical entity/edge SET (KG-AC-10)
-        partition_replace(_DbShim(conn), folder_id, "run-2", "dag-1", str(uuid.uuid4()), ent_rows, edge_rows)
+        partition_replace(_DbShim(conn), folder_id, "run-2", "dag-1", str(uuid.uuid4()), ent_rows, edge_rows, graph_scope="s")
         conn.commit()
         with conn.cursor() as cur:
             ents2, edges2 = _snapshot(cur, folder_id)
