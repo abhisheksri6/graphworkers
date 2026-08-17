@@ -44,9 +44,9 @@ def conn():
 def _seed_entity(cur, folder_id, uid, surface, etype):
     cur.execute(
         """INSERT INTO public.kg_entities
-               (folder_id, entity_uid, entity_type, surface_form,
+               (folder_id, graph_scope, entity_uid, entity_type, surface_form,
                 ontology_pack, ontology_version, stage)
-           VALUES (%s,%s,%s,%s,'fibo_core','1.0','staged')
+           VALUES (%s,'test-canon',%s,%s,%s,'fibo_core','1.0','staged')
            ON CONFLICT (entity_uid) DO NOTHING""",
         (folder_id, uid, etype, surface),
     )
@@ -61,9 +61,9 @@ def _seed_edge(cur, folder_id, edge_uid, rtype, src_uid, dst_uid, confidence, ev
     dst_id = cur.fetchone()[0]
     cur.execute(
         """INSERT INTO public.kg_edges
-               (folder_id, edge_uid, relation_type, src_entity_id, dst_entity_id,
+               (folder_id, graph_scope, edge_uid, relation_type, src_entity_id, dst_entity_id,
                 src_entity_uid, dst_entity_uid, confidence, evidence_text, source_doc_id)
-           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+           VALUES (%s,'test-canon',%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
         (folder_id, edge_uid, rtype, src_id, dst_id, src_uid, dst_uid, confidence, evidence_text,
          source_doc_id),
     )

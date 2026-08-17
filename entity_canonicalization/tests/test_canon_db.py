@@ -18,6 +18,18 @@ _DSN = os.environ.get("DATABASE_URL", "")
 pytestmark = pytest.mark.skipif(not _DSN, reason="DATABASE_URL not set (DB-integration test)")
 FIBO = load_pack("fibo_core")
 
+# CB-OBS-41: every test gets its OWN graph scope. Unique folder ids were never enough — these cases
+# assert on fixed canonical_keys ("organization:acme", "agreement:ima-gue-2026-101"), so sibling
+# tests collided on the canonical IDENTITY, and before v16 so did real pipeline data carrying the
+# same agreementId. Scope-per-TEST (not per-folder: the cross-run cases span folders on purpose).
+_SCOPE = {"name": "test-canon"}
+
+
+@pytest.fixture(autouse=True)
+def _isolated_scope():
+    _SCOPE["name"] = f"test-{uuid.uuid4()}"
+    yield
+
 
 def _norm(dsn):
     for p in ("postgresql+psycopg2://", "postgresql+asyncpg://", "postgresql+psycopg://"):
@@ -54,18 +66,19 @@ def _seed(cur, folder_id, mentions):
         uid = f"{folder_id}:{i}"
         cur.execute(
             """INSERT INTO public.kg_entities
-                   (folder_id, entity_uid, entity_type, surface_form, source_doc_id, attributes,
-                    ontology_pack, ontology_version, stage)
-               VALUES (%s,%s,%s,%s,%s,%s,'fibo_core','1.0','staged')
+                   (folder_id, graph_scope, entity_uid, entity_type, surface_form, source_doc_id,
+                    attributes, ontology_pack, ontology_version, stage)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,'fibo_core','1.0','staged')
                ON CONFLICT (entity_uid) DO NOTHING""",
-            (folder_id, uid, etype, surface, doc_id, _json.dumps(attrs)),
+            (folder_id, _SCOPE["name"], uid, etype, surface, doc_id, _json.dumps(attrs)),
         )
 
 
 def _canonical_row(cur, canonical_key):
     cur.execute(
-        "SELECT canonical_name, aliases FROM public.kg_canonical_entities WHERE canonical_key = %s",
-        (canonical_key,),
+        "SELECT canonical_name, aliases FROM public.kg_canonical_entities "
+        "WHERE canonical_key = %s AND graph_scope = %s",
+        (canonical_key, _SCOPE["name"]),
     )
     row = cur.fetchone()
     return (row[0], row[1]) if row else (None, None)
@@ -73,8 +86,9 @@ def _canonical_row(cur, canonical_key):
 
 def _canonical_attributes(cur, canonical_key):
     cur.execute(
-        "SELECT attributes FROM public.kg_canonical_entities WHERE canonical_key = %s",
-        (canonical_key,),
+        "SELECT attributes FROM public.kg_canonical_entities "
+        "WHERE canonical_key = %s AND graph_scope = %s",
+        (canonical_key, _SCOPE["name"]),
     )
     row = cur.fetchone()
     return row[0] if row else None
@@ -89,8 +103,13 @@ def _cleanup(conn, folder_ids, canonical_keys=()):
     with conn.cursor() as cur:
         for f in folder_ids:
             cur.execute("DELETE FROM public.kg_entities WHERE folder_id=%s", (f,))
-        for k in canonical_keys:
-            cur.execute("DELETE FROM public.kg_canonical_entities WHERE canonical_key=%s", (k,))
+        # The whole per-test scope goes, so `canonical_keys` need not be kept in step with what
+        # the test actually minted (CB-OBS-41). Other scopes — including real pipeline data — are
+        # untouchable by construction.
+        cur.execute("DELETE FROM public.kg_edges WHERE graph_scope=%s", (_SCOPE["name"],))
+        cur.execute("DELETE FROM public.kg_entities WHERE graph_scope=%s", (_SCOPE["name"],))
+        cur.execute(
+            "DELETE FROM public.kg_canonical_entities WHERE graph_scope=%s", (_SCOPE["name"],))
     conn.commit()
 
 
@@ -290,8 +309,8 @@ def test_resolve_or_mint_collision_gets_a_deterministic_suffix_not_a_wrong_reuse
     from store import _resolve_or_mint
     try:
         with conn.cursor() as cur:
-            cid1, minted1 = _resolve_or_mint(cur, "Organization", "acme!!!corp")
-            cid2, minted2 = _resolve_or_mint(cur, "Organization", "acme---corp")
+            cid1, minted1 = _resolve_or_mint(cur, "Organization", "acme!!!corp", graph_scope=_SCOPE["name"])
+            cid2, minted2 = _resolve_or_mint(cur, "Organization", "acme---corp", graph_scope=_SCOPE["name"])
         conn.commit()
         assert minted1 is True and minted2 is True  # BOTH are novel mints, not a false merge
         assert cid1 != cid2  # two DISTINCT real clusters, never collapsed into one
@@ -307,7 +326,7 @@ def test_resolve_or_mint_collision_gets_a_deterministic_suffix_not_a_wrong_reuse
         # re-resolving EITHER original normalized_form must land on its OWN existing row, not mint
         # a third row and not cross-wire to the other cluster.
         with conn.cursor() as cur:
-            cid1_again, minted_again = _resolve_or_mint(cur, "Organization", "acme!!!corp")
+            cid1_again, minted_again = _resolve_or_mint(cur, "Organization", "acme!!!corp", graph_scope=_SCOPE["name"])
         conn.commit()
         assert minted_again is False and cid1_again == cid1
     finally:
