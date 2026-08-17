@@ -18,7 +18,7 @@ _DSN = os.environ.get("DATABASE_URL", "")
 pytestmark = pytest.mark.skipif(not _DSN, reason="DATABASE_URL not set (DB-integration test)")
 FIBO = load_pack("fibo_core")
 
-# CB-OBS-41: every test gets its OWN graph scope. Unique folder ids were never enough — these cases
+# CB-OBS-42: every test gets its OWN graph scope. Unique folder ids were never enough — these cases
 # assert on fixed canonical_keys ("organization:acme", "agreement:ima-gue-2026-101"), so sibling
 # tests collided on the canonical IDENTITY, and before v16 so did real pipeline data carrying the
 # same agreementId. Scope-per-TEST (not per-folder: the cross-run cases span folders on purpose).
@@ -104,7 +104,7 @@ def _cleanup(conn, folder_ids, canonical_keys=()):
         for f in folder_ids:
             cur.execute("DELETE FROM public.kg_entities WHERE folder_id=%s", (f,))
         # The whole per-test scope goes, so `canonical_keys` need not be kept in step with what
-        # the test actually minted (CB-OBS-41). Other scopes — including real pipeline data — are
+        # the test actually minted (CB-OBS-42). Other scopes — including real pipeline data — are
         # untouchable by construction.
         cur.execute("DELETE FROM public.kg_edges WHERE graph_scope=%s", (_SCOPE["name"],))
         cur.execute("DELETE FROM public.kg_entities WHERE graph_scope=%s", (_SCOPE["name"],))
