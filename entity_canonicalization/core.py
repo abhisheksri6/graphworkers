@@ -49,6 +49,9 @@ class Mention:
     # chunk_metadata is incomplete, KG-AC-73).
     declared_aliases: List[str] = field(default_factory=list)  # KG-AC-96 (P26) — terms the DOCUMENT
     # explicitly binds to this entity, carried through from extraction. Never inferred.
+    reference_only: bool = False  # KG-AC-94 — the document NAMED this entity (with an identifier)
+    # but never described it. Read only by the canonical recompute (S6): a canonical entity is
+    # reference_only iff EVERY contributing mention is. Never part of clustering.
 
 
 def normalize_surface(surface: str) -> str:

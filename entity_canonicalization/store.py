@@ -223,7 +223,7 @@ def _mentions_for_canonical(cur, canonical_id: str) -> List[Mention]:
     idempotent and correct after a re-run."""
     cur.execute(
         """SELECT entity_uid, entity_type, surface_form, source_doc_id, source_chunk_id,
-                  span_start, is_abstract
+                  span_start, is_abstract, reference_only
              FROM public.kg_entities
             WHERE canonical_id = %s
             ORDER BY id""",
@@ -231,17 +231,24 @@ def _mentions_for_canonical(cur, canonical_id: str) -> List[Mention]:
     )
     return [
         Mention(entity_uid=r[0], entity_type=r[1], surface_form=r[2],
-               source_doc_id=r[3], source_chunk_id=r[4], span_start=r[5], is_abstract=bool(r[6]))
+               source_doc_id=r[3], source_chunk_id=r[4], span_start=r[5], is_abstract=bool(r[6]),
+               reference_only=bool(r[7]))
         for r in cur.fetchall()
     ]
 
 
-def _update_display_name(cur, canonical_id: str, canonical_name: str, aliases: List[str]) -> None:
+def _update_display_name(cur, canonical_id: str, canonical_name: str, aliases: List[str],
+                         reference_only: bool) -> None:
+    """KG-AC-76/77 display fields + KG-AC-94's cross-document `reference_only`. All three are
+    recomputed from the FULL mention set on every touch (the P10 posture), which is what makes the
+    stub → described transition work: the stub is the join point a later document merges into, so
+    freezing any of them at the founding batch would leave a fully-read entity still labelled a
+    stub."""
     cur.execute(
         """UPDATE public.kg_canonical_entities
-              SET canonical_name = %s, aliases = %s
+              SET canonical_name = %s, aliases = %s, reference_only = %s
             WHERE canonical_id = %s""",
-        (canonical_name, Json(aliases), canonical_id),
+        (canonical_name, Json(aliases), reference_only, canonical_id),
     )
 
 
@@ -398,7 +405,13 @@ def canonicalize_batch(db, folder_ids: Sequence[str], *, fuzzy_floor: float = _D
             # reuse) — not just this batch's cluster — so aliases stay true across merges.
             full_set = _mentions_for_canonical(cur, cid)
             canonical_name, aliases = choose_canonical_name(full_set)
-            _update_display_name(cur, cid, canonical_name, aliases)
+            # KG-AC-94: reference_only iff EVERY contributing mention is — "described beats
+            # referenced", so one fully-read mention clears the stub marker for the whole instance.
+            # Deliberately not a majority vote and not first-writer-wins: the AC fixes the rule
+            # here precisely so the outcome cannot depend on which mention the merge happens to
+            # pick as canonical.
+            reference_only = all(m.reference_only for m in full_set)
+            _update_display_name(cur, cid, canonical_name, aliases, reference_only)
 
             # KG-AC-78: same full-recompute posture — merge facts from every mention now sharing
             # this canonical_id, never last-write-wins.
