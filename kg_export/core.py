@@ -21,6 +21,14 @@ class CanonicalNode:
     attributes: Dict[str, List[Dict[str, Any]]] = field(default_factory=dict)  # KG-AC-83 — P11/P13's
     # merged-facts shape: {property: [{value, normalized_value, status, provenance}]}
     entity_iri: Optional[str] = None  # KG-AC-86 — the pack's declared iri for this entity_type, if any
+    # v16 (KG-AC-104) — the display + honesty properties. Built by v13–v15 so a consumer could tell
+    # how a node came to be, but never exported: an Agreement, its derived hub and a reference stub
+    # all rendered as near-identical nodes carrying the same identifier string.
+    canonical_name: Optional[str] = None   # KG-AC-76
+    aliases: List[str] = field(default_factory=list)  # KG-AC-77
+    reference_only: bool = False           # KG-AC-94 — named with an identifier, never described
+    is_abstract: bool = False              # KG-AC-72
+    is_derived: bool = False               # KG-AC-92 — an entailment, not a source assertion
 
 
 @dataclass
@@ -75,12 +83,23 @@ def _facts_to_properties(attributes: Dict[str, List[Dict[str, Any]]]) -> Dict[st
     return props
 
 
+# v16 (KG-AC-104): the STABLE primary label every exported node carries. The MERGE key must not be
+# the entity type — a canonical type legitimately sharpens across batches (KG-AC-103), and a
+# re-labelled entity MERGEing on its new label would create a SECOND node for one canonical_id,
+# i.e. the export manufacturing exactly the duplicates this spec exists to remove. The type is data
+# on the node; a secondary type label is deliberately NOT set, because removing a stale one on
+# every re-export is bookkeeping with no consumer today.
+NODE_LABEL = "KgEntity"
+
+
 def build_node_statement(node: CanonicalNode) -> Tuple[str, Dict[str, Any]]:
-    label = sanitize_ident(node.entity_type, fallback="Entity")
     cypher = (
-        f"MERGE (n:`{label}` {{canonical_id: $canonical_id}}) "
+        f"MERGE (n:`{NODE_LABEL}` {{canonical_id: $canonical_id}}) "
         "SET n.entity_type = $entity_type, n.normalized_form = $normalized_form, "
-        "n.provenance = $provenance, n.ontology_class = $ontology_class "
+        "n.provenance = $provenance, n.ontology_class = $ontology_class, "
+        "n.canonical_name = $canonical_name, n.aliases = $aliases, "
+        "n.reference_only = $reference_only, n.is_abstract = $is_abstract, "
+        "n.is_derived = $is_derived "
         "SET n += $facts"
     )
     params = {
@@ -89,9 +108,29 @@ def build_node_statement(node: CanonicalNode) -> Tuple[str, Dict[str, Any]]:
         "normalized_form": node.normalized_form,
         "provenance": _json_provenance(node.provenance),
         "ontology_class": qualified_name(node.entity_iri, node.entity_type),  # KG-AC-86
+        "canonical_name": node.canonical_name,       # KG-AC-76
+        "aliases": list(node.aliases or []),          # KG-AC-77
+        "reference_only": bool(node.reference_only),  # KG-AC-94
+        "is_abstract": bool(node.is_abstract),        # KG-AC-72
+        "is_derived": bool(node.is_derived),          # KG-AC-92
         "facts": _facts_to_properties(node.attributes),  # KG-AC-83
     }
     return cypher, params
+
+
+def reconcile_statement(keep_canonical_ids: List[str]) -> Tuple[str, Dict[str, Any]]:
+    """KG-AC-105 (export half): remove nodes this scope's plane of record no longer contains.
+
+    Sound ONLY because one database holds exactly one scope (KG-AC-97/98) — there the set-diff of
+    `canonical_id`s is authoritative. Bounded to `:KgEntity` so it can never touch anything this
+    exporter did not write, and `DETACH` so a removed node's relationships go with it (a canonical
+    edge whose endpoint is gone has nothing left to mean)."""
+    cypher = (
+        f"MATCH (n:`{NODE_LABEL}`) "
+        "WHERE NOT n.canonical_id IN $keep "
+        "DETACH DELETE n"
+    )
+    return cypher, {"keep": list(keep_canonical_ids)}
 
 
 def build_rel_statement(edge: CanonicalEdge) -> Tuple[str, Dict[str, Any]]:

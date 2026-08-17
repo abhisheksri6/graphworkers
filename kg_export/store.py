@@ -17,12 +17,26 @@ from core import CanonicalEdge, CanonicalNode
 
 _NODE_SQL = """
     SELECT ce.canonical_id, ce.entity_type, ce.normalized_form, ce.attributes,
-           array_agg(DISTINCT e.folder_id) AS folders, count(*) AS mention_count
+           array_agg(DISTINCT e.folder_id) AS folders, count(*) AS mention_count,
+           ce.canonical_name, ce.aliases, ce.reference_only,
+           bool_or(e.is_abstract) AS is_abstract,
+           bool_or(e.extractor = 'derived') AS is_derived
       FROM public.kg_entities e
       JOIN public.kg_canonical_entities ce ON ce.canonical_id = e.canonical_id
      WHERE e.stage = 'canonicalized' {node_filter}
-     GROUP BY ce.canonical_id, ce.entity_type, ce.normalized_form, ce.attributes
+     GROUP BY ce.canonical_id, ce.entity_type, ce.normalized_form, ce.attributes,
+              ce.canonical_name, ce.aliases, ce.reference_only
      ORDER BY ce.canonical_id
+"""
+
+# KG-AC-105 (export half): every canonical id the SCOPE's plane of record still contains. The
+# reconcile deletes whatever the target database holds beyond this set — sound only because one
+# database holds exactly one scope (KG-AC-97/98).
+_SCOPE_CANONICAL_IDS_SQL = """
+    SELECT DISTINCT ce.canonical_id
+      FROM public.kg_canonical_entities ce
+      JOIN public.kg_entities e ON e.canonical_id = ce.canonical_id
+     WHERE ce.graph_scope = %s AND e.stage = 'canonicalized'
 """
 
 _EDGE_SQL = """
@@ -75,6 +89,12 @@ def read_canonical_graph(
             canonical_id=str(r[0]), entity_type=r[1], normalized_form=r[2], attributes=r[3] or {},
             provenance={"folders": [f for f in (r[4] or []) if f], "mentions": r[5]},
             entity_iri=_entity_iri(pack, r[1]),
+            # v16 (KG-AC-104): display + honesty properties. `is_abstract`/`is_derived` are read
+            # from the contributing MENTIONS (the canonical row carries neither), so a cluster with
+            # any derived contributor exports as derived — the marker exists to stop a consumer
+            # mistaking an entailment for something the document asserted.
+            canonical_name=r[6], aliases=list(r[7] or []), reference_only=bool(r[8]),
+            is_abstract=bool(r[9]), is_derived=bool(r[10]),
         )
         for r in cur.fetchall()
     ]
@@ -99,6 +119,37 @@ def read_canonical_graph(
         for r in cur.fetchall()
     ]
     return nodes, edges
+
+
+def scope_canonical_ids(cur, graph_scope: str) -> List[str]:
+    """Every canonical id this scope's plane of record still contains (KG-AC-105 export half)."""
+    cur.execute(_SCOPE_CANONICAL_IDS_SQL, (graph_scope,))
+    return [str(r[0]) for r in cur.fetchall()]
+
+
+def batch_graph_scope(cur, folder_ids: Optional[Sequence[str]] = None) -> Optional[str]:
+    """The scope this export serves, derived from the canonicalized rows it is about to read
+    (KG-AC-97/98). Mixed scopes fail loud: one export writes one database, and a database holds
+    exactly one scope — exporting a mixed batch would put one tenant's graph into another's store.
+    A full rebuild (``folder_ids=None``) reads whatever single scope the canonicalized graph has."""
+    if folder_ids:
+        cur.execute(
+            """SELECT DISTINCT graph_scope FROM public.kg_entities
+                WHERE folder_id = ANY(%s) AND stage = 'canonicalized'""",
+            (list(folder_ids),),
+        )
+    else:
+        cur.execute(
+            "SELECT DISTINCT graph_scope FROM public.kg_entities WHERE stage = 'canonicalized'")
+    scopes = [r[0] for r in cur.fetchall()]
+    if not scopes:
+        return None
+    if len(scopes) > 1:
+        raise ValueError(
+            f"kg_export: mixed graph_scope in one export ({sorted(scopes)}) — one export writes one "
+            "database and a database holds exactly one scope"
+        )
+    return scopes[0]
 
 
 def _entity_iri(pack, entity_type: str) -> Optional[str]:

@@ -25,7 +25,7 @@ import callback as cb
 import store
 from capability_schema import CAPABILITY_SCHEMA  # re-exported per WORKER_NAMING
 from clients import Neo4jConnectionError, Neo4jExporter
-from core import run_export
+from core import NODE_LABEL, reconcile_statement, run_export
 from ontologies import load_pack
 
 __all__ = ["CAPABILITY_SCHEMA", "celery_app", "kg_export_task", "process_export"]
@@ -58,6 +58,29 @@ def _post_callback(http_post: Callable, url: str, payload: Dict[str, Any]) -> No
         logger.error("Failed to POST kg_export worker results: %s", cb_err)
 
 
+def assert_uniqueness_constraint(exp) -> None:
+    """KG-AC-104: the target database must carry a uniqueness constraint on
+    `:KgEntity(canonical_id)` before anything is written.
+
+    Read-only (`SHOW CONSTRAINTS`) — the worker still issues NO schema DDL, preserving the
+    least-privilege posture KG-AC-52 fixed for `CREATE DATABASE`: an export connection needs write
+    rights, never DBMS-admin. Without the constraint, concurrent MERGEs on one canonical_id can
+    race into duplicate nodes, which is precisely the defect this export exists not to create — so
+    a missing constraint fails loud, pointing at the provisioning runbook, rather than producing a
+    graph that looks fine until it doesn't."""
+    rows = exp.execute("SHOW CONSTRAINTS YIELD labelsOrTypes, properties RETURN labelsOrTypes, properties", {})
+    for row in rows or []:
+        labels = (row.get("labelsOrTypes") or []) if isinstance(row, dict) else []
+        props = (row.get("properties") or []) if isinstance(row, dict) else []
+        if NODE_LABEL in labels and "canonical_id" in props:
+            return
+    raise Neo4jConnectionError(
+        f"target database has no uniqueness constraint on :{NODE_LABEL}(canonical_id). It is "
+        "created once at provisioning, not by this worker (least-privilege, KG-AC-52) — see "
+        "specs/knowledge-graph/provisioning-runbook.md"
+    )
+
+
 def process_export(task_id, folder_ids: Sequence[str], kg_export_config, dag_id, run_id, *,
                    db, http_post, worker_results_url, exporter=None) -> Dict[str, Any]:
     """Task body (deps injected). Reads the canonical graph for the batch and MERGE-projects it into
@@ -72,6 +95,24 @@ def process_export(task_id, folder_ids: Sequence[str], kg_export_config, dag_id,
 
         conn = db.connection().connection
         with conn.cursor() as cur:
+            # KG-AC-97/98: one export serves one scope. Derived from the rows about to be read, and
+            # re-validated against the profile below — a drifted pairing must never write a
+            # tenant's graph into another tenant's database.
+            graph_scope = store.batch_graph_scope(cur, folder_ids)
+            declared_scope = cfg.get("graph_scope")
+            if graph_scope and declared_scope and graph_scope != declared_scope:
+                raise Neo4jConnectionError(
+                    f"kg_export: this batch's canonical rows belong to scope {graph_scope!r} but "
+                    f"the node's profile declares {declared_scope!r} — refusing to export one "
+                    "scope's graph into another's database"
+                )
+            # KG-AC-100's sibling lock class: same-scope exports serialize, so the reconcile below
+            # can never act on a snapshot a concurrent export is still adding to. Transaction-scoped
+            # (released on commit OR rollback); a DIFFERENT class from canonicalization's, so canon
+            # and export of one scope may still overlap — export reads only `canonicalized` rows.
+            if graph_scope:
+                cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (f"kg_export:{graph_scope}",))
+
             # KG-AC-83/86: resolve the pack for ontology-qualified export -- an unresolvable pack
             # name (or none at all) is NOT fatal, per KG-AC-86's own "not an error" clause; the
             # export simply proceeds with bare names (pack=None).
@@ -81,10 +122,17 @@ def process_export(task_id, folder_ids: Sequence[str], kg_export_config, dag_id,
             except Exception:  # noqa: BLE001 — an unloadable pack degrades to bare names, never fails export
                 pack = None
             nodes, edges = store.read_canonical_graph(cur, folder_ids, pack=pack)
+            keep_ids = store.scope_canonical_ids(cur, graph_scope) if graph_scope else []
 
         exp_cm = exporter if exporter is not None else Neo4jExporter(connection_id, database=cfg.get("database"))
         with exp_cm as exp:
+            assert_uniqueness_constraint(exp)  # KG-AC-104 — read-only preflight, before any write
             summary = run_export(nodes, edges, exp.execute)
+            # KG-AC-105 (export half): reconcile the database to the plane of record. Runs AFTER
+            # the MERGEs so a node written by this very export is in `keep_ids` by construction.
+            if graph_scope:
+                cypher, params = reconcile_statement(keep_ids)
+                exp.execute(cypher, params)
         node_count, rel_count = summary["node_count"], summary["relationship_count"]
         cb.log_result_summary(logger, len(folder_ids or []), node_count, rel_count)
     except Exception as exc:  # noqa: BLE001 — fail loud, POST the error

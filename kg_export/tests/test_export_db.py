@@ -42,20 +42,20 @@ def test_db_round_trip_carries_support_confidence_and_evidence(conn):
         with conn.cursor() as cur:
             for cid, key, etype, nf in ((cid_bank, key_bank, "Bank", "acme"), (cid_bond, key_bond, "Bond", "acme 2030")):
                 cur.execute(
-                    """INSERT INTO public.kg_canonical_entities (canonical_id, canonical_key, entity_type, normalized_form)
-                       VALUES (%s,%s,%s,%s)""", (cid, key, etype, nf))
+                    """INSERT INTO public.kg_canonical_entities (canonical_id, canonical_key, entity_type, normalized_form, graph_scope)
+                       VALUES (%s,%s,%s,%s,'test-export')""", (cid, key, etype, nf))
             for uid, cid, etype in (("u1", cid_bank, "Bank"), ("u2", cid_bond, "Bond")):
                 cur.execute(
                     """INSERT INTO public.kg_entities
                            (folder_id, entity_uid, entity_type, surface_form, canonical_id,
-                            ontology_pack, ontology_version, stage)
-                       VALUES (%s,%s,%s,%s,%s,'fibo_core','1.0','canonicalized')""",
+                            ontology_pack, ontology_version, stage, graph_scope)
+                       VALUES (%s,%s,%s,%s,%s,'fibo_core','1.0','canonicalized','test-export')""",
                     (folder, uid, etype, "Acme", cid))
             # the pre-aggregated canonical edge, as entity_canonicalization would have written it
             cur.execute(
                 """INSERT INTO public.kg_canonical_edges
-                       (src_canonical_id, relation_type, dst_canonical_id, support_count, confidence, evidence_text)
-                   VALUES (%s,'issues',%s,2,0.82,%s)""",
+                       (src_canonical_id, relation_type, dst_canonical_id, support_count, confidence, evidence_text, graph_scope)
+                   VALUES (%s,'issues',%s,2,0.82,%s,'test-export')""",
                 (cid_bank, cid_bond, ["Acme Corp issues the bond.", "A second filing confirms it."]))
         conn.commit()
 
@@ -90,23 +90,23 @@ def test_db_round_trip_collapses_and_projects(conn):
         with conn.cursor() as cur:
             for cid, key, etype, nf in ((cid_bank, key_bank, "Bank", "acme"), (cid_bond, key_bond, "Bond", "acme 2030")):
                 cur.execute(
-                    """INSERT INTO public.kg_canonical_entities (canonical_id, canonical_key, entity_type, normalized_form)
-                       VALUES (%s,%s,%s,%s)""", (cid, key, etype, nf))
+                    """INSERT INTO public.kg_canonical_entities (canonical_id, canonical_key, entity_type, normalized_form, graph_scope)
+                       VALUES (%s,%s,%s,%s,'test-export')""", (cid, key, etype, nf))
             # two mentions of the bank (collapse to ONE node) + one bond, all canonicalized
             mentions = [("u1", cid_bank, "Bank"), ("u2", cid_bank, "Bank"), ("u3", cid_bond, "Bond")]
             for uid, cid, etype in mentions:
                 cur.execute(
                     """INSERT INTO public.kg_entities
                            (folder_id, entity_uid, entity_type, surface_form, canonical_id,
-                            ontology_pack, ontology_version, stage)
-                       VALUES (%s,%s,%s,%s,%s,'fibo_core','1.0','canonicalized')""",
+                            ontology_pack, ontology_version, stage, graph_scope)
+                       VALUES (%s,%s,%s,%s,%s,'fibo_core','1.0','canonicalized','test-export')""",
                     (folder, uid, etype, "Acme", cid))
             # the ONE canonical edge entity_canonicalization would have aggregated from the batch's
             # (now-collapsed) mention-edges.
             cur.execute(
                 """INSERT INTO public.kg_canonical_edges
-                       (src_canonical_id, relation_type, dst_canonical_id, support_count, confidence)
-                   VALUES (%s,'issues',%s,1,1.0)""",
+                       (src_canonical_id, relation_type, dst_canonical_id, support_count, confidence, graph_scope)
+                   VALUES (%s,'issues',%s,1,1.0,'test-export')""",
                 (cid_bank, cid_bond),
             )
         conn.commit()
@@ -148,15 +148,15 @@ def test_db_round_trip_carries_merged_facts_as_attributes(conn):
         with conn.cursor() as cur:
             cur.execute(
                 """INSERT INTO public.kg_canonical_entities
-                       (canonical_id, canonical_key, entity_type, normalized_form, attributes)
-                   VALUES (%s,%s,'Agreement',%s,%s)""",
+                       (canonical_id, canonical_key, entity_type, normalized_form, attributes, graph_scope)
+                   VALUES (%s,%s,'Agreement',%s,%s,'test-export')""",
                 (cid, key, folder, _json.dumps(attrs)),
             )
             cur.execute(
                 """INSERT INTO public.kg_entities
                        (folder_id, entity_uid, entity_type, surface_form, canonical_id,
-                        ontology_pack, ontology_version, stage)
-                   VALUES (%s,'u1','Agreement','the Agreement',%s,'fibo_core','1.0','canonicalized')""",
+                        ontology_pack, ontology_version, stage, graph_scope)
+                   VALUES (%s,'u1','Agreement','the Agreement',%s,'fibo_core','1.0','canonicalized','test-export')""",
                 (folder, cid),
             )
         conn.commit()
@@ -182,13 +182,13 @@ def test_db_round_trip_resolves_entity_and_relation_iri_from_the_passed_pack(con
     try:
         with conn.cursor() as cur:
             cur.execute(
-                """INSERT INTO public.kg_canonical_entities (canonical_id, canonical_key, entity_type, normalized_form)
-                   VALUES (%s,%s,'Investor',%s)""", (cid_investor, key_investor, folder))
+                """INSERT INTO public.kg_canonical_entities (canonical_id, canonical_key, entity_type, normalized_form, graph_scope)
+                   VALUES (%s,%s,'Investor',%s,'test-export')""", (cid_investor, key_investor, folder))
             cur.execute(
                 """INSERT INTO public.kg_entities
                        (folder_id, entity_uid, entity_type, surface_form, canonical_id,
-                        ontology_pack, ontology_version, stage)
-                   VALUES (%s,'u1','Investor','XYZ Insurance',%s,'investment_fibo','2.4','canonicalized')""",
+                        ontology_pack, ontology_version, stage, graph_scope)
+                   VALUES (%s,'u1','Investor','XYZ Insurance',%s,'investment_fibo','2.4','canonicalized','test-export')""",
                 (folder, cid_investor),
             )
         conn.commit()
@@ -215,13 +215,13 @@ def test_db_round_trip_with_no_pack_exports_none_iri_not_an_error(conn):
     try:
         with conn.cursor() as cur:
             cur.execute(
-                """INSERT INTO public.kg_canonical_entities (canonical_id, canonical_key, entity_type, normalized_form)
-                   VALUES (%s,%s,'Fund',%s)""", (cid, key, folder))
+                """INSERT INTO public.kg_canonical_entities (canonical_id, canonical_key, entity_type, normalized_form, graph_scope)
+                   VALUES (%s,%s,'Fund',%s,'test-export')""", (cid, key, folder))
             cur.execute(
                 """INSERT INTO public.kg_entities
                        (folder_id, entity_uid, entity_type, surface_form, canonical_id,
-                        ontology_pack, ontology_version, stage)
-                   VALUES (%s,'u1','Fund','Acme Fund',%s,'investment_fibo','2.4','canonicalized')""",
+                        ontology_pack, ontology_version, stage, graph_scope)
+                   VALUES (%s,'u1','Fund','Acme Fund',%s,'investment_fibo','2.4','canonicalized','test-export')""",
                 (folder, cid),
             )
         conn.commit()
@@ -246,8 +246,8 @@ def test_batch_pack_name_scoped_and_unscoped(conn):
             cur.execute(
                 """INSERT INTO public.kg_entities
                        (folder_id, entity_uid, entity_type, surface_form,
-                        ontology_pack, ontology_version, stage)
-                   VALUES (%s,'u1','Agreement','X','investment_fibo','2.4','canonicalized')""",
+                        ontology_pack, ontology_version, stage, graph_scope)
+                   VALUES (%s,'u1','Agreement','X','investment_fibo','2.4','canonicalized','test-export')""",
                 (folder,),
             )
         conn.commit()

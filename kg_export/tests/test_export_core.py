@@ -39,9 +39,13 @@ def test_roundtrip_one_merge_per_node_and_edge():
     assert len(node_runs) == 3 and len(rel_runs) == 2
     # the canonical graph maps 1:1 to the exported statements (round-trip)
     assert {r[1]["canonical_id"] for r in node_runs} == {"c1", "c2", "c3"}
-    # node labels come from the reconciled type; provenance rides as a property
+    # v16 (KG-AC-104): the MERGE key is the STABLE `:KgEntity` label and the reconciled type rides
+    # as a PROPERTY — keying on the type would create a second node for an entity whose type
+    # sharpens across batches (KG-AC-103). The label contract itself is asserted in
+    # test_export_contract_v16.py; here we only keep the round-trip honest.
     bank = next(r for r in node_runs if r[1]["canonical_id"] == "c1")
-    assert "`Bank`" in bank[0] and "external_id" not in bank[1]
+    assert "`KgEntity`" in bank[0] and bank[1]["entity_type"] == "Bank"
+    assert "external_id" not in bank[1]
 
 
 @pytest.mark.ac("KG-AC-29")
