@@ -52,11 +52,21 @@ class Mention:
 
 
 def normalize_surface(surface: str) -> str:
-    """Lowercase, strip accents + punctuation, drop legal suffixes, collapse whitespace."""
+    """Lowercase, strip accents + punctuation, drop legal suffixes, strip LEADING determiners,
+    collapse whitespace.
+
+    *(v16, KG-AC-101 — determiner stripping moved here from ``normalize_alias``.)* Contractual
+    English cites the same entity as "The Acme Fund" and "Acme Fund" interchangeably, but with the
+    determiner kept those two normalize differently, land in DIFFERENT blocks (`tok:the` vs
+    `tok:acme`) and are therefore never even compared — no floor/ceiling tuning can reach a pair
+    that is never a candidate. P26 already learned this for declared aliases and fixed it in
+    ``normalize_alias`` alone; the asymmetry between the two was itself the bug."""
     s = unicodedata.normalize("NFKD", surface or "")
     s = "".join(c for c in s if not unicodedata.combining(c)).lower()
     s = re.sub(r"[^a-z0-9\s]", " ", s)
     tokens = [t for t in s.split() if t and t not in _LEGAL_SUFFIXES]
+    while tokens and tokens[0] in _LEADING_DETERMINERS:
+        tokens.pop(0)
     return " ".join(tokens)
 
 
@@ -64,7 +74,7 @@ def normalize_surface(surface: str) -> str:
 # Investor", "this Agreement", "such Party" interchangeably with the bare term. Stripping only
 # articles leaves "this agreement" unmatched against the declared term "Agreement" — found on the
 # real document during P26's own end-to-end replay, after the article-only version had already
-# fixed the party case.
+# fixed the party case. *(v16: consumed by `normalize_surface` itself — see KG-AC-101.)*
 _LEADING_DETERMINERS = {"the", "a", "an", "this", "that", "these", "those", "such", "said"}
 
 
@@ -80,11 +90,12 @@ def normalize_alias(value: str) -> str:
 
     Scope keeps this safe: the bridge only fires for mentions of the SAME entity_type in the SAME
     document where one side explicitly DECLARED the term — a determiner-stripped collision cannot
-    merge anything the document did not itself bind."""
-    tokens = normalize_surface(value).split()
-    while tokens and tokens[0] in _LEADING_DETERMINERS:
-        tokens.pop(0)
-    return " ".join(tokens)
+    merge anything the document did not itself bind.
+
+    *(v16, KG-AC-101: `normalize_surface` now strips leading determiners itself, so this is a thin
+    alias kept for call-site clarity — the alias bridge and the surface tiers deliberately share
+    ONE normalization, which is exactly what the pre-v16 asymmetry got wrong.)*"""
+    return normalize_surface(value)
 
 
 def _identifiers_conflict(a: Mention, b: Mention) -> bool:
@@ -120,10 +131,17 @@ def identifier_values(attributes: Sequence[Dict[str, Any]], entity_type: str, pa
         return {}
     declared = getattr(pack, "datatype_properties", None) or {}
     out: Dict[str, str] = {}
+    # v16 (KG-AC-102): the domain gate accepts an ANCESTOR domain, matching extraction's own gate
+    # (KG-AC-70). Pre-v16 this demanded `dp.domain == entity_type` exactly, so a `lei` declared on
+    # `Organization` was silently invisible for a mention typed `Bank` — the identifier tier simply
+    # never saw the strongest evidence it exists to use.
+    ancestors = set(pack.ancestors(entity_type)) if hasattr(pack, "ancestors") else set()
     for fact in attributes:
         prop = (fact or {}).get("property")
         dp = declared.get(prop)
-        if dp is None or dp.range != "identifier" or dp.domain != entity_type:
+        if dp is None or dp.range != "identifier":
+            continue
+        if dp.domain != entity_type and dp.domain not in ancestors:
             continue
         raw = fact.get("normalized_value") or fact.get("value")
         norm = normalize_identifier(raw)
@@ -132,7 +150,7 @@ def identifier_values(attributes: Sequence[Dict[str, Any]], entity_type: str, pa
     return out
 
 
-def cluster_identifier(cluster: Sequence[Mention]) -> Optional[str]:
+def cluster_identifier(cluster: Sequence[Mention], pack=None) -> Optional[str]:
     """The identity basis for a cluster that carries a pack-declared identifier (KG-AC-79 amended,
     P25) — used by store.py as the ``normalized_form``/``canonical_key`` basis so cross-run reuse
     keys on the IDENTIFIER, not on whichever surface happened to sort first.
@@ -142,7 +160,19 @@ def cluster_identifier(cluster: Sequence[Mention]) -> Optional[str]:
     ``cluster[0].normalized_form`` values and therefore mint different canonical_keys for the same
     real entity. Deterministic under input reordering (``min`` over all values, not positional) —
     a well-formed cluster carries exactly one value; ``min`` only matters defensively, if the fuzzy
-    or LLM tier merged two identifier-bearing mentions."""
+    or LLM tier merged two identifier-bearing mentions.
+
+    ***(v16, KG-AC-103.)*** With a ``pack``, the basis is chosen by the pack's DECLARATION ORDER of
+    the identifier properties, not by `min` over raw values. Two runs that extract different
+    identifier SUBSETS of one entity (run 1 sees `agreementId`, run 2 sees `agreementId` + `lei`)
+    would otherwise pick different minima and mint two canonical keys for one real entity — the
+    same cross-run split KG-AC-38 exists to prevent, reintroduced through the tie-break."""
+    if pack is not None and getattr(pack, "datatype_properties", None):
+        for prop in pack.datatype_properties:  # declaration order
+            values = sorted({(m.identifiers or {}).get(prop) for m in cluster
+                             if (m.identifiers or {}).get(prop)})
+            if values:
+                return values[0]
     values = sorted({v for m in cluster for v in (m.identifiers or {}).values() if v})
     return values[0] if values else None
 
@@ -155,7 +185,8 @@ def slugify(s: str) -> str:
     return s.strip("-")
 
 
-def canonical_key(entity_type: str, normalized_form: str, suffix: int = 0) -> str:
+def canonical_key(entity_type: str, normalized_form: str, suffix: int = 0, *,
+                  pack=None, fallback_surface: str = "") -> str:
     """KG-AC-79 (v13 — amends the v11 pipe-delimited format): the UNIQUE key on
     kg_canonical_entities, now a deterministic, human-readable ``<entity-type-slug>:
     <canonical-name-slug>`` identifier — "the addressable, exportable identity" (the AC's own
@@ -174,16 +205,58 @@ def canonical_key(entity_type: str, normalized_form: str, suffix: int = 0) -> st
     ``suffix`` (KG-AC-79's collision requirement): 0 omits it; >0 appends ``-<suffix>``,
     deterministically — store.py's `_resolve_or_mint` increments it only when a computed key
     already belongs to a DIFFERENT normalized_form (a genuine slug collision), never for a
-    legitimate cross-run match (KG-AC-38, same normalized_form reusing the same key)."""
-    key = f"{slugify(entity_type)}:{slugify(normalized_form)}"
+    legitimate cross-run match (KG-AC-38, same normalized_form reusing the same key).
+
+    ***(v16, KG-AC-103.)*** The type half is the pack hierarchy's **ROOT** type when a ``pack`` is
+    supplied (`organization:acme` for every `Organization` descendant): the reconciled type of one
+    real entity legitimately sharpens across batches — `Organization` in a document that names it
+    plainly, `InvestmentAdviser` in one that does not — and keying on the specific type mints a
+    second canonical node each time it moves. The reconciled specific type stays on the row as
+    data. No pack ⇒ the bare type, unchanged.
+
+    ***(v16, KG-AC-101.)*** ``fallback_surface`` is used when ``normalized_form`` slugs EMPTY (a
+    suffix-only or determiner-only surface): `organization:` would otherwise be one shared key for
+    every degenerate surface in the corpus. The fallback is the plain lowercased surface, which is
+    unclusterable-but-distinct rather than silently shared."""
+    type_slug = slugify(pack.root_of(entity_type) if pack is not None else entity_type)
+    name_slug = slugify(normalized_form) or slugify(fallback_surface)
+    key = f"{type_slug}:{name_slug}"
     return f"{key}-{suffix}" if suffix else key
 
 
 def fuzzy_score(a: str, b: str) -> float:
+    """Similarity of two NORMALIZED forms. An empty side short-circuits to 0.0 (KG-AC-101): legal-
+    suffix stripping legitimately empties surfaces like "Ltd" or "The Company", and
+    ``SequenceMatcher("", "").ratio()`` is **1.0** — so without this guard every degenerate surface
+    in the corpus auto-accepted against every other one and collapsed into a single junk canonical
+    entity. An unclusterable surface must simply never match, not match everything."""
+    if not a or not b:
+        return 0.0
     return SequenceMatcher(None, a, b).ratio()
 
 
-def match_band(a: Mention, b: Mention, *, fuzzy_floor: float, fuzzy_ceiling: float) -> str:
+def types_compatible(a_type: str, b_type: str, pack=None) -> bool:
+    """KG-AC-102's single rule, usable without a pack. With a pack: identical or ancestor/descendant
+    per the declared hierarchy. Without one: identical only — the SAFE degradation, since it can
+    never over-merge (it only declines pairs the hierarchy would have allowed)."""
+    if a_type == b_type:
+        return True
+    if pack is None or not hasattr(pack, "is_compatible"):
+        return False
+    return pack.is_compatible(a_type, b_type)
+
+
+def _is_generic_surface(normalized: str, pack) -> bool:
+    """True when a normalized surface is just a pack TYPE NAME ("agreement", "organization") —
+    clarify F7. Such a surface identifies nothing: two distinct agreements each titled only
+    "Investment Management Agreement" are routine in this domain, and auto-accepting their exact
+    match silently collapses them into one canonical entity."""
+    if pack is None or not normalized:
+        return False
+    return any(normalize_surface(t) == normalized for t in getattr(pack, "entity_types", {}))
+
+
+def match_band(a: Mention, b: Mention, *, fuzzy_floor: float, fuzzy_ceiling: float, pack=None) -> str:
     """Three-band match (KG-AC-24, *amended v11 — the LEI-equal short-circuit is removed with the
     gazetteer/external-id plane*; ***re-introduced on a pack-declared basis at P25***): a shared
     identifier property decides the match OUTRIGHT, in both directions, before any surface
@@ -197,13 +270,29 @@ def match_band(a: Mention, b: Mention, *, fuzzy_floor: float, fuzzy_ceiling: flo
 
     Then the surface bands, unchanged: exact normalized ⇒ accept; fuzzy ≥ ceiling ⇒ accept;
     < floor ⇒ reject; between ⇒ ambiguous (→ LLM)."""
+    # v16 (KG-AC-102): ONE type gate in front of every positive decision. Incompatible types are
+    # not the same entity however identical their strings — pre-v16 this function applied NO type
+    # check at all, so "Jordan" the person merged with "Jordan" the place on exact equality.
+    compatible = types_compatible(a.entity_type, b.entity_type, pack)
+
     if set(a.identifiers or {}) & set(b.identifiers or {}):
-        return REJECT if _identifiers_conflict(a, b) else ACCEPT
+        if _identifiers_conflict(a, b):
+            return REJECT
+        # A shared value across INCOMPATIBLE types is a string collision, not an identity claim.
+        return ACCEPT if compatible else REJECT
+
     if a.normalized_form and a.normalized_form == b.normalized_form:
+        if not compatible:
+            return AMBIGUOUS  # adjudicator-gated, never an unconditional accept
+        # clarify F7: an identifier-LESS pair whose shared surface is merely a pack type name
+        # identifies nothing — the adjudicator decides, in-batch and at cross-run resolution alike.
+        if _is_generic_surface(a.normalized_form, pack):
+            return AMBIGUOUS
         return ACCEPT
+
     score = fuzzy_score(a.normalized_form, b.normalized_form)
     if score >= fuzzy_ceiling:
-        return ACCEPT
+        return ACCEPT if compatible else AMBIGUOUS
     if score < fuzzy_floor:
         return REJECT
     return AMBIGUOUS
@@ -235,7 +324,7 @@ class _UnionFind:
 
 def cluster_mentions(
     mentions: List[Mention], *, fuzzy_floor: float, fuzzy_ceiling: float,
-    adjudicate: Optional[Callable[[Mention, Mention], bool]] = None,
+    adjudicate: Optional[Callable[[Mention, Mention], bool]] = None, pack=None,
 ) -> List[List[Mention]]:
     """Cluster mentions to one identity per real-world entity (KG-AC-22), in two tiers:
 
@@ -256,15 +345,20 @@ def cluster_mentions(
     Deterministic for a fixed adjudicate. Returns clusters in first-appearance order."""
     uf = _UnionFind([m.entity_uid for m in mentions])
 
-    # Tier 1 — keyed by (entity_type, property, value): a shared value across DIFFERENT types is
-    # not an identity claim (an Agreement and a Subscription may legitimately collide on a string).
-    by_identifier: Dict[Tuple[str, str, str], List[str]] = {}
+    # Tier 1 — keyed by (property, value), then unioned only across COMPATIBLE types (KG-AC-102).
+    # Pre-v16 the key included the exact `entity_type`, so the same company typed `Bank` in one
+    # chunk and `Organization` in another never unioned on its shared identifier — ordinary
+    # chunk-boundary typing variance defeating the strongest identity evidence available. The
+    # compatibility gate keeps the protection the exact key was really providing: a value shared by
+    # an Agreement and a Person is still a collision, not an identity.
+    by_identifier: Dict[Tuple[str, str], List[Mention]] = {}
     for m in mentions:
         for prop, value in (m.identifiers or {}).items():
-            by_identifier.setdefault((m.entity_type, prop, value), []).append(m.entity_uid)
-    for uids in by_identifier.values():
-        for other in uids[1:]:
-            uf.union(uids[0], other)
+            by_identifier.setdefault((prop, value), []).append(m)
+    for group in by_identifier.values():
+        for other in group[1:]:
+            if types_compatible(group[0].entity_type, other.entity_type, pack):
+                uf.union(group[0].entity_uid, other.entity_uid)
 
     # Tier 2 — document-declared aliases (KG-AC-96). A mention whose normalized surface matches a
     # term another mention's document explicitly BOUND to itself is that entity, deterministically.
@@ -297,7 +391,8 @@ def cluster_mentions(
     for block in by_block.values():
         for i in range(len(block)):
             for j in range(i + 1, len(block)):
-                verdict = match_band(block[i], block[j], fuzzy_floor=fuzzy_floor, fuzzy_ceiling=fuzzy_ceiling)
+                verdict = match_band(block[i], block[j], fuzzy_floor=fuzzy_floor,
+                                     fuzzy_ceiling=fuzzy_ceiling, pack=pack)
                 if verdict == ACCEPT or (verdict == AMBIGUOUS and adjudicate and adjudicate(block[i], block[j])):
                     uf.union(block[i].entity_uid, block[j].entity_uid)
 

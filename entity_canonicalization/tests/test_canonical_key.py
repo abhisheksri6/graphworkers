@@ -67,3 +67,48 @@ def test_canonical_key_collision_suffix_is_deterministic():
     assert suffixed == f"{base}-2"
     # calling again with the same suffix must reproduce the SAME string (deterministic, not random)
     assert canonical_key("Organization", "acme corp", suffix=2) == suffixed
+
+
+# ---- v16 (KG-AC-103): root-type slug + declaration-order identifier basis ---------------------
+@pytest.mark.ac("KG-AC-103")
+def test_key_type_half_is_the_hierarchy_root_not_the_specific_type():
+    """One real entity legitimately sharpens its type across batches (`Organization` in a document
+    that names it plainly, `InvestmentAdviser` in one that does not). Keying on the SPECIFIC type
+    mints a second canonical node every time that happens - F-CHUNK-2 resurfacing at the batch
+    boundary. The root keeps both batches on one key; the specific type stays on the row as data."""
+    from ontologies import load_pack
+    pack = load_pack("fibo_core")
+    assert pack.root_of("InvestmentAdviser") == "Organization"
+    specific = canonical_key("InvestmentAdviser", "acme corp", pack=pack)
+    generic = canonical_key("Organization", "acme corp", pack=pack)
+    assert specific == generic == "organization:acme-corp"
+    # without a pack the bare type is used, unchanged from the pre-v16 format
+    assert canonical_key("InvestmentAdviser", "acme corp") == "investmentadviser:acme-corp"
+
+
+@pytest.mark.ac("KG-AC-103")
+def test_identifier_basis_follows_pack_declaration_order_not_value_order():
+    """Two runs extracting different identifier SUBSETS of one entity must still key identically.
+    Picking `min` over raw values makes the basis depend on WHICH identifiers a run happened to
+    see, so run 1 (agreementId only) and run 2 (agreementId + a lexically smaller lei) would mint
+    two canonical keys for one real entity - the cross-run split KG-AC-38 exists to prevent."""
+    from core import Mention, cluster_identifier
+    from ontologies import load_pack
+    from ontologies.loader import DatatypeProperty
+
+    pack = load_pack("fibo_core")
+    pack.datatype_properties.clear()
+    for name in ("agreementId", "lei"):  # declaration order: agreementId wins
+        pack.datatype_properties[name] = DatatypeProperty(
+            property=name, domain="Organization", range="identifier", guidance="")
+
+    def _m(uid, ids):
+        m = Mention(entity_uid=uid, entity_type="Organization", surface_form="x")
+        m.identifiers = ids
+        return m
+
+    run1 = [_m("u1", {"agreementId": "ima-2026-101"})]
+    run2 = [_m("u2", {"agreementId": "ima-2026-101", "lei": "aaa-smaller-than-ima"})]
+    assert cluster_identifier(run1, pack) == cluster_identifier(run2, pack) == "ima-2026-101"
+    # the pre-v16 min-over-values basis is what would have split them
+    assert cluster_identifier(run2) == "aaa-smaller-than-ima"

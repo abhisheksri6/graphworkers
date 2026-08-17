@@ -309,6 +309,27 @@ class Pack:
         """True iff a is a (strict) descendant of b."""
         return b in self.ancestors(a)
 
+    def root_of(self, entity_type: str) -> str:
+        """The top of ``entity_type``'s branch (itself when it is already a root). v16 (KG-AC-103):
+        `canonical_key`'s type half keys on the ROOT so that a cluster typed `Organization` in one
+        batch and `Bank` in a later one resolves to the SAME key — otherwise ordinary chunk-boundary
+        typing variance mints a second canonical node for one real entity (F-CHUNK-2 resurfacing at
+        the batch boundary)."""
+        chain = self.ancestors(entity_type)
+        return chain[-1] if chain else entity_type
+
+    def is_compatible(self, a: str, b: str) -> bool:
+        """THE type rule every identity tier shares (KG-AC-102): two types are compatible iff they
+        are identical or one is an ancestor of the other. Symmetric by construction.
+
+        Before v16 three tiers each had their own rule and produced opposite errors from the same
+        evidence — identifier collection/grouping were too strict (an inherited identifier was
+        invisible; `Bank` never unioned with `Organization`), while the surface bands had no type
+        check at all (`Jordan` the person merged with `Jordan` the place)."""
+        if a == b:
+            return True
+        return self.is_descendant(a, b) or self.is_descendant(b, a)
+
     def most_specific_type(self, types: Sequence[str]) -> Optional[str]:
         """KG-AC-23: among a cluster's candidate types choose the MOST SPECIFIC per the declared
         `parent` hierarchy — a descendant always beats its ancestor; two types on different branches

@@ -63,7 +63,10 @@ def test_cluster_collapses_duplicates_one_identity():
         _m("2", "InvestmentAdviser", "Acme Corporation"),  # same entity, finer type
         _m("3", "Person", "Jane Roe"),
     ]
-    clusters = cluster_mentions(mentions, fuzzy_floor=0.8, fuzzy_ceiling=0.95)
+    # v16 (KG-AC-102): recognising `InvestmentAdviser` as a subtype of `Organization` requires the
+    # declared hierarchy, so the pack is now part of this collapse — without it `match_band`
+    # degrades safely to exact-type equality and declines the cross-type merge.
+    clusters = cluster_mentions(mentions, fuzzy_floor=0.8, fuzzy_ceiling=0.95, pack=load_pack("fibo_core"))
     sizes = sorted(len(c) for c in clusters)
     assert sizes == [1, 2]  # the two Acme mentions collapse; Jane stands alone
 

@@ -60,7 +60,8 @@ def read_staged_mentions(cur, folder_ids: Sequence[str], pack=None) -> List[Ment
     return out
 
 
-def _resolve_or_mint(cur, entity_type: str, normalized_form: str) -> Tuple[str, bool]:
+def _resolve_or_mint(cur, entity_type: str, normalized_form: str, *,
+                     pack=None, fallback_surface: str = "") -> Tuple[str, bool]:
     """Race-safe resolve-or-mint (KG-AC-38, key format amended KG-AC-79): INSERT ON CONFLICT DO
     NOTHING RETURNING mints a novel canonical; on conflict, distinguish a LEGITIMATE cross-run
     match (existing row has the SAME normalized_form — reuse it, KG-AC-38) from a genuine SLUG
@@ -70,7 +71,8 @@ def _resolve_or_mint(cur, entity_type: str, normalized_form: str) -> Tuple[str, 
     Returns (canonical_id, was_minted)."""
     suffix = 0
     while True:
-        key = canonical_key(entity_type, normalized_form, suffix)
+        key = canonical_key(entity_type, normalized_form, suffix, pack=pack,
+                            fallback_surface=fallback_surface)
         cur.execute(
             """INSERT INTO public.kg_canonical_entities
                    (canonical_key, entity_type, normalized_form)
@@ -239,8 +241,12 @@ def canonicalize_batch(db, folder_ids: Sequence[str], *, fuzzy_floor: float = _D
         if not mentions:
             return {"canonical_count": 0, "merged_count": 0, "minted_count": 0}
 
+        # v16 (KG-AC-102): the pack MUST reach clustering — the type-compatibility rule is what
+        # lets `Organization` and its subtype `InvestmentAdviser` be recognised as one entity
+        # (KG-AC-23's own premise). Without it `types_compatible` degrades to exact equality, which
+        # is safe but would silently stop the cross-type merges this capability depends on.
         clusters = cluster_mentions(mentions, fuzzy_floor=fuzzy_floor, fuzzy_ceiling=fuzzy_ceiling,
-                                    adjudicate=adjudicate)
+                                    adjudicate=adjudicate, pack=pack)
         for cluster in clusters:
             rtype = reconcile_type([m.entity_type for m in cluster], pack) if pack else cluster[0].entity_type
             # KG-AC-79 amended (P25): an identifier-bearing cluster keys on its IDENTIFIER, not on
@@ -249,8 +255,9 @@ def canonicalize_batch(db, folder_ids: Sequence[str], *, fuzzy_floor: float = _D
             # different surface subsets of the same entity would mint different canonical_keys.
             # `normalized_form` is the match key by definition, so it carries the identity basis;
             # the human-readable surfaces live in canonical_name/aliases (KG-AC-76/77).
-            norm = cluster_identifier(cluster) or cluster[0].normalized_form
-            cid, was_minted = _resolve_or_mint(cur, rtype, norm)
+            norm = cluster_identifier(cluster, pack) or cluster[0].normalized_form
+            cid, was_minted = _resolve_or_mint(cur, rtype, norm, pack=pack,
+                                               fallback_surface=cluster[0].surface_form)
             minted += 1 if was_minted else 0
             merged += 0 if was_minted else 1
             canonical_ids.add(cid)
