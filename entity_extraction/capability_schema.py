@@ -30,6 +30,8 @@ CAPABILITY_SCHEMA: Dict[str, Any] = {
                                             "description": "Extraction engine: spacy | llm"},
         "entity_extraction_config.ontology_pack": {"type": "string", "required": "always",
                                                    "description": "Ontology pack name (e.g. generic, fibo_core)"},
+        "entity_extraction_config.graph_scope": {"type": "string", "required": "always",
+                                                 "description": "Registered kg_scope profile naming the graph partition these rows land in (KG-AC-97/98)"},
         "entity_extraction_config.confidence_threshold": {"type": "number", "required": "optional",
                                                           "description": "Minimum confidence to keep a mention (0-1)"},
         "entity_extraction_config.promote_top_n": {"type": "integer", "required": "optional",
