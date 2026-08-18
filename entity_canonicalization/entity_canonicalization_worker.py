@@ -64,14 +64,28 @@ celery_app.conf.task_default_queue = _queue_names[0]
 
 def make_llm_adjudicator(client) -> Callable[[Mention, Mention], bool]:
     """Return an adjudicate(a, b) -> bool for the AMBIGUOUS band (KG-AC-35). Each call goes through
-    the LLM (temperature 0, deterministic gating) and is captured in client.usage[]."""
+    the LLM (temperature 0, deterministic gating) and is captured in client.usage[].
+
+    **Memoized per batch on the unordered (type, surface) pair.** The decision depends on nothing
+    else — the prompt is built from exactly those four values — so re-asking is pure cost. Blocking
+    compares MENTIONS, and one entity legitimately appears dozens of times ("CIS Limited" ×68 in a
+    real batch), so the same textual question recurs hundreds of times within a single run. Cache
+    is per-adjudicator (i.e. per batch), so a later batch still re-decides rather than inheriting a
+    stale verdict."""
+    seen: Dict[Any, bool] = {}
+
     def adjudicate(a: Mention, b: Mention) -> bool:
+        key = frozenset(((a.entity_type, a.surface_form), (b.entity_type, b.surface_form)))
+        if key in seen:
+            return seen[key]
         prompt = (
             'Are these two mentions the SAME real-world entity? Answer with only "yes" or "no".\n'
             f'A: {a.entity_type} "{a.surface_form}"\n'
             f'B: {b.entity_type} "{b.surface_form}"'
         )
-        return client.complete(prompt).strip().lower().startswith("y")
+        verdict = client.complete(prompt).strip().lower().startswith("y")
+        seen[key] = verdict
+        return verdict
     return adjudicate
 
 

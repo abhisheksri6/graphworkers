@@ -1,4 +1,4 @@
-"""specs/knowledge-graph v16 — S4: ONE type-compatibility rule across every identity tier
+﻿"""specs/knowledge-graph v16 â€” S4: ONE type-compatibility rule across every identity tier
 (KG-AC-102, KG-AC-24 as amended).
 
 The 2026-08-17 review found three different type rules in one file, producing opposite errors from
@@ -10,7 +10,7 @@ outright). v16 replaces all three with: compatible iff identical or ancestor/des
 """
 import pytest
 
-from core import Mention, cluster_mentions, identifier_values, match_band, ACCEPT, AMBIGUOUS
+from core import Mention, cluster_mentions, identifier_values, match_band, ACCEPT, AMBIGUOUS, REJECT
 from ontologies import load_pack
 
 FIBO = load_pack("fibo_core")
@@ -39,7 +39,7 @@ def test_pack_exposes_compatibility_and_root():
 @pytest.mark.ac("KG-AC-24")
 def test_identifier_collection_accepts_an_ancestor_domain():
     """KG-AC-70 parity: extraction's own domain gate accepts ancestors, so a property declared on
-    `Organization` is legitimately extracted for a `Bank` — and canonicalization must then SEE it."""
+    `Organization` is legitimately extracted for a `Bank` â€” and canonicalization must then SEE it."""
     pack = _pack_with_org_identifier()
     attrs = [{"property": "orgId", "value": "X-1", "normalized_value": "X-1"}]
     assert identifier_values(attrs, "Bank", pack) == {"orgId": "x-1"}, (
@@ -77,17 +77,24 @@ def test_exact_surface_equality_across_incompatible_types_is_never_an_accept():
 @pytest.mark.ac("KG-AC-102")
 def test_exact_surface_equality_within_compatible_types_still_accepts():
     """The pack is REQUIRED for a cross-type accept: without a hierarchy to consult, `match_band`
-    degrades safely to exact-type-equality and returns AMBIGUOUS rather than guessing — it declines
-    a merge it cannot justify, never invents one."""
+    degrades safely to exact-type-equality and REJECTS rather than guessing â€” it declines a merge
+    it cannot justify, never invents one.
+
+    *(Amended 2026-08-18 â€” this returned AMBIGUOUS until a live run showed what that costs.)*
+    Routing incompatible types to the adjudicator produced **2,582 sequential LLM calls for one
+    419-mention batch**, which reads as a hang. It was also pointless: a cross-type pair cannot
+    merge whatever the model answers, because the resulting cluster would have no reconcilable
+    type. KG-AC-102 asks for "at most ambiguous, never an unconditional accept" â€” REJECT satisfies
+    that and is the only affordable reading."""
     a, b = _m("u1", "Bank", "First National"), _m("u2", "Organization", "First National")
     assert match_band(a, b, pack=FIBO, **BANDS) == ACCEPT
-    assert match_band(a, b, **BANDS) == AMBIGUOUS, "no pack must degrade safely, not over-merge"
+    assert match_band(a, b, **BANDS) == REJECT, "no pack must decline the merge, not spend an LLM call"
 
 
 # ---- clarify F7: identifier-less generic titles ----------------------------
 @pytest.mark.ac("KG-AC-102")
 def test_identifier_less_generic_title_is_adjudicated_not_auto_accepted():
-    """Two distinct agreements both surfacing only as their type name must not silently collapse —
+    """Two distinct agreements both surfacing only as their type name must not silently collapse â€”
     the failure the review found for 'Investment Management Agreement'."""
     a = _m("u1", "Organization", "organization")
     b = _m("u2", "Organization", "organization")

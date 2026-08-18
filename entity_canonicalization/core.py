@@ -285,20 +285,34 @@ def match_band(a: Mention, b: Mention, *, fuzzy_floor: float, fuzzy_ceiling: flo
         return ACCEPT if compatible else REJECT
 
     if a.normalized_form and a.normalized_form == b.normalized_form:
+        # Incompatible types REJECT deterministically — they are never asked of the LLM.
+        # KG-AC-102 requires "at most ambiguous, never an unconditional accept"; REJECT satisfies
+        # that and is the only affordable reading. Measured on a real 419-mention batch
+        # (2026-08-18): routing these to the adjudicator produced **2,582 sequential LLM calls**
+        # for one batch — 994 of them InvestmentManager↔LegalEntity, i.e. one company written in
+        # two roles — which reads as a hang, not as a decision. The types also cannot merge even
+        # if the model said yes: a cross-type cluster has no reconcilable type. Note that packs
+        # with no declared `parent` links (investment_fibo declares none) make EVERY distinct type
+        # pair incompatible, so this path is the common case, not the exotic one.
         if not compatible:
-            return AMBIGUOUS  # adjudicator-gated, never an unconditional accept
+            return REJECT
         # clarify F7: an identifier-LESS pair whose shared surface is merely a pack type name
-        # identifies nothing — the adjudicator decides, in-batch and at cross-run resolution alike.
+        # identifies nothing — the adjudicator decides. Same-type only, so it stays bounded.
         if _is_generic_surface(a.normalized_form, pack):
             return AMBIGUOUS
         return ACCEPT
 
     score = fuzzy_score(a.normalized_form, b.normalized_form)
     if score >= fuzzy_ceiling:
-        return ACCEPT if compatible else AMBIGUOUS
+        return ACCEPT if compatible else REJECT
     if score < fuzzy_floor:
         return REJECT
-    return AMBIGUOUS
+    # The ambiguous band is for pairs that COULD be one entity. Incompatible types cannot be,
+    # whatever the adjudicator answers — a cross-type cluster has no reconcilable type — so an LLM
+    # call there is pure cost. Measured on a real batch: this one line accounted for 586 of the
+    # remaining calls, InvestmentRelationship hubs scoring 0.8-0.9 against the very Investor
+    # surfaces they were derived from.
+    return AMBIGUOUS if compatible else REJECT
 
 
 def block_key(m: Mention) -> str:
