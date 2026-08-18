@@ -70,9 +70,13 @@ def assert_uniqueness_constraint(exp) -> None:
     graph that looks fine until it doesn't."""
     rows = exp.execute("SHOW CONSTRAINTS YIELD labelsOrTypes, properties RETURN labelsOrTypes, properties", {})
     for row in rows or []:
-        labels = (row.get("labelsOrTypes") or []) if isinstance(row, dict) else []
-        props = (row.get("properties") or []) if isinstance(row, dict) else []
-        if NODE_LABEL in labels and "canonical_id" in props:
+        # The neo4j driver yields `Record`, which is a Mapping but NOT a dict — an
+        # `isinstance(row, dict)` guard here silently read every row as empty and rejected a
+        # correctly-provisioned database (found live 2026-08-17 on the owner's first pipeline run).
+        # `dict(row)` covers Record, dict and anything else exposing keys(); a row shape that
+        # exposes none simply does not match, which is the safe direction.
+        data = dict(row) if hasattr(row, "keys") else {}
+        if NODE_LABEL in (data.get("labelsOrTypes") or []) and "canonical_id" in (data.get("properties") or []):
             return
     raise Neo4jConnectionError(
         f"target database has no uniqueness constraint on :{NODE_LABEL}(canonical_id). It is "
