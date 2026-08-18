@@ -84,30 +84,24 @@ def test_live_export_round_trips_through_real_neo4j(pg_conn, kg_export_config):
     cid_bank, cid_bond = str(uuid.uuid4()), str(uuid.uuid4())
     key_bank, key_bond = f"Bank|{folder}", f"Bond|{folder}"
 
-    # v16: seed into the scope the PROFILE declares. The worker refuses to export a batch whose
-    # rows belong to a different scope than its profile names (KG-AC-98), so a fixed literal here
-    # would fail against any real profile — correctly. Falls back to a test scope only when the
-    # profile predates v16 and declares none.
-    scope = kg_export_config.get("graph_scope") or "test-live"
-
     try:
         with pg_conn.cursor() as cur:
             for cid, key, etype, nf in ((cid_bank, key_bank, "Bank", "acme"), (cid_bond, key_bond, "Bond", "acme 2030")):
                 cur.execute(
-                    "INSERT INTO public.kg_canonical_entities (canonical_id, canonical_key, entity_type, normalized_form, graph_scope) "
-                    "VALUES (%s,%s,%s,%s,%s)", (cid, key, etype, nf, scope))
+                    "INSERT INTO public.kg_canonical_entities (canonical_id, canonical_key, entity_type, normalized_form) "
+                    "VALUES (%s,%s,%s,%s)", (cid, key, etype, nf))
             for uid, cid, etype in (("u1", cid_bank, "Bank"), ("u2", cid_bond, "Bond")):
                 cur.execute(
                     "INSERT INTO public.kg_entities "
                     "(folder_id, entity_uid, entity_type, surface_form, canonical_id, "
-                    " ontology_pack, ontology_version, stage, graph_scope) "
-                    "VALUES (%s,%s,%s,%s,%s,'fibo_core','1.0','canonicalized',%s)",
-                    (folder, uid, etype, "Acme", cid, scope))
+                    " ontology_pack, ontology_version, stage) "
+                    "VALUES (%s,%s,%s,%s,%s,'fibo_core','1.0','canonicalized')",
+                    (folder, uid, etype, "Acme", cid))
             cur.execute(
                 "INSERT INTO public.kg_canonical_edges "
-                "(src_canonical_id, relation_type, dst_canonical_id, support_count, confidence, evidence_text, graph_scope) "
-                "VALUES (%s,'issues',%s,1,0.9,%s,%s)",
-                (cid_bank, cid_bond, ["Acme Corp issues the bond."], scope))
+                "(src_canonical_id, relation_type, dst_canonical_id, support_count, confidence, evidence_text) "
+                "VALUES (%s,'issues',%s,1,0.9,%s)",
+                (cid_bank, cid_bond, ["Acme Corp issues the bond."]))
         pg_conn.commit()
 
         payload = process_export(
@@ -127,10 +121,7 @@ def test_live_export_round_trips_through_real_neo4j(pg_conn, kg_export_config):
                 "MATCH (a {canonical_id: $a})-[r]->(b {canonical_id: $b}) RETURN type(r) AS rel, r.support_count AS sc",
                 {"a": cid_bank, "b": cid_bond},
             )
-            # v16: `execute` returns fully-consumed ROWS, not a lazy Result — an unconsumed
-            # auto-commit result can be discarded at session close (a CREATE CONSTRAINT was lost
-            # that way, live, 2026-08-17), so consumption moved into the client.
-            record = result[0] if result else None
+            record = result.single()
             assert record is not None, "the exported relationship was not found in Neo4j"
             assert record["rel"] == "issues"
             assert record["sc"] == 1

@@ -88,17 +88,8 @@ class Neo4jExporter:
         return self
 
     def execute(self, cypher: str, params: Dict[str, Any]) -> Any:
-        """Run one statement and **fully consume** it, returning its rows as a list.
-
-        Consumption is not a convenience — it is correctness. `session.run` opens an auto-commit
-        transaction whose result streams lazily, so a statement whose result is never read can be
-        discarded when the session closes: a `CREATE CONSTRAINT` issued this way was observed
-        (2026-08-17) to report success and then not exist. The same hazard applies to the final
-        MERGE of an export. Reading the result here also means a server-side failure is raised
-        INSIDE this try, so it is wrapped as `Neo4jConnectionError` (KG-AC-52's fail-loud posture)
-        rather than escaping later, outside the handler that exists to catch it."""
         try:
-            return list(self._session.run(cypher, params))
+            return self._session.run(cypher, params)
         except Neo4jConnectionError:
             raise
         except Exception as exc:  # noqa: BLE001 — includes "database does not exist" (KG-AC-52)

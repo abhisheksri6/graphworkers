@@ -79,11 +79,7 @@ class _FakeSession:
             self._store["nodes"].add(params["canonical_id"])          # MERGE = upsert (idempotent)
         elif "MERGE (a)-[" in cypher:
             self._store["rels"].add((params["src"], params["dst"]))
-        # An iterable, like the real driver's Result — `Neo4jExporter.execute` consumes what it
-        # gets, because an UNCONSUMED auto-commit result can be discarded at session close (a
-        # CREATE CONSTRAINT was lost that way, live, 2026-08-17). A fake returning None was easier
-        # to satisfy than the real driver, which is how that class of bug survives a green suite.
-        return []
+        return None
 
     def close(self):
         pass

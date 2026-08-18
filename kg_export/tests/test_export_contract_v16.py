@@ -79,30 +79,9 @@ def test_reconcile_deletes_only_canonical_ids_absent_from_the_plane_of_record():
     assert ":`KgEntity`" in cypher, "reconcile must be bounded to the label this exporter owns"
 
 
-class _Record:
-    """Stand-in for a neo4j `Record`: a Mapping that is deliberately **NOT a dict**.
-
-    This shape is the whole point of the class. The original fake returned plain dicts, so the
-    preflight's `isinstance(row, dict)` guard passed in tests and then rejected a correctly
-    provisioned database in production (found live 2026-08-17, on the owner's first pipeline run
-    after v16). A fake that is easier to satisfy than the real driver is not a test."""
-
-    def __init__(self, data):
-        self._data = dict(data)
-
-    def keys(self):
-        return self._data.keys()
-
-    def __getitem__(self, key):
-        return self._data[key]
-
-    def __iter__(self):
-        return iter(self._data)
-
-
 class _FakeExp:
     def __init__(self, constraints):
-        self._constraints = [_Record(c) for c in constraints]
+        self._constraints = constraints
         self.calls = []
 
     def execute(self, cypher, params):
